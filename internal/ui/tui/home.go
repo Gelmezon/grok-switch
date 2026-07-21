@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Gelmezon/grok-switch/internal/models"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
 	"github.com/Gelmezon/grok-switch/internal/ui"
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Focus panels on the home screen (Tab cycles).
@@ -29,19 +29,20 @@ type listItem struct {
 
 // HomeModel is the main provider browser.
 type HomeModel struct {
-	version    string
-	configPath string
-	list       []profiles.Profile
-	status     switcher.Status
-	cursor     int
-	focus      int
-	filter     string
-	filtering  bool
-	filterBuf  string
-	width      int
-	height     int
-	toast      string
-	showBanner bool
+	version       string
+	configPath    string
+	list          []profiles.Profile
+	status        switcher.Status
+	cursor        int
+	focus         int
+	filter        string
+	filtering     bool
+	filterBuf     string
+	width         int
+	height        int
+	toast         string
+	showBanner    bool
+	latestVersion string
 }
 
 func NewHome(version, configPath string, list []profiles.Profile, st switcher.Status) *HomeModel {
@@ -204,6 +205,8 @@ func (m *HomeModel) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			m.focus = focusList
 		case "r":
 			return m, func() tea.Msg { return RefreshMsg{} }
+		case "U":
+			return m, func() tea.Msg { return requestUpdateMsg{} }
 		case "esc":
 			if m.filter != "" {
 				m.filter = ""
@@ -234,6 +237,10 @@ func (m *HomeModel) SetData(list []profiles.Profile, st switcher.Status) {
 	}
 }
 
+func (m *HomeModel) SetAvailableUpdate(version string) {
+	m.latestVersion = version
+}
+
 func (m *HomeModel) View() string {
 	var parts []string
 
@@ -248,12 +255,15 @@ func (m *HomeModel) View() string {
 		activeName = m.status.Profile.Name
 		activeModel = m.status.Profile.DefaultModel
 	}
-	topLeft := theme.Title.Render(fmt.Sprintf(" grok-switch  v%s ", m.version))
+	topLeft := theme.Title.Render(fmt.Sprintf(" grok-switch  %s ", ui.VersionLabel(m.version)))
 	topRight := theme.Success.Render(theme.SymActive + " " + activeName)
 	if activeModel != "" {
 		topRight += theme.Muted.Render("  " + activeModel)
 	}
 	topRight += theme.Muted.Render("   " + ui.Truncate(m.configPath, 36))
+	if m.latestVersion != "" {
+		topRight += theme.Warning.Render("   ↑ " + m.latestVersion)
+	}
 	barInner := lipgloss.JoinHorizontal(lipgloss.Top,
 		topLeft,
 		lipgloss.NewStyle().Width(max(1, m.width-6-lipgloss.Width(topLeft)-lipgloss.Width(topRight))).Render(""),
@@ -366,16 +376,21 @@ func (m *HomeModel) View() string {
 		theme.Bold.Render("操作") + "\n" +
 			"Enter 切换  a 添加  e 编辑\n" +
 			"d 删除      t 测试  o 官方\n" +
-			"b 备份      s 状态  / 搜索",
+			"b 备份      s 状态  / 搜索\n" +
+			"U 检查/更新 r 刷新",
 	)
 
 	rightCol := lipgloss.JoinVertical(lipgloss.Left, detailBox, ops)
 	mid := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "  ", rightCol)
 	parts = append(parts, mid)
 
-	help := theme.Help.Render("  ↑↓ 选择  Enter 切换  Tab 面板  t 测试模型  a 添加  ? 帮助  q 退出")
+	help := theme.Help.Render("  ↑↓ 选择  Enter 切换  Tab 面板  t 测试模型  a 添加  U 检查/更新  ? 帮助  q 退出")
 	if m.toast != "" {
-		help = theme.Success.Render("  "+theme.SymOK+"  "+m.toast) + "\n" + help
+		if strings.HasPrefix(m.toast, theme.SymFail) {
+			help = theme.Error.Render("  "+m.toast) + "\n" + help
+		} else {
+			help = theme.Success.Render("  "+theme.SymOK+"  "+m.toast) + "\n" + help
+		}
 	}
 	parts = append(parts, help)
 

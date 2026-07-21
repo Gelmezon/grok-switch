@@ -13,7 +13,7 @@ import (
 
 // Version is set via -ldflags at build time.
 
-var Version = "0.1.0"
+var Version = "dev"
 
 // Run is the grok-switch entrypoint.
 func Run(args []string) error {
@@ -69,6 +69,8 @@ func Run(args []string) error {
 		return runImportCurrent(rest)
 	case "backup":
 		return runBackup(rest)
+	case "update", "upgrade":
+		return runUpdate(rest)
 	default:
 		fmt.Fprintln(os.Stderr, theme.Fail(fmt.Sprintf("未知子命令 %q", cmd)))
 		printHelp(os.Stderr)
@@ -147,6 +149,11 @@ func printHelp(w io.Writer) {
   backup restore <文件名> 恢复备份
   backup prune [--keep N] 清理旧备份（默认保留 10 个）
 
+程序更新:
+  update                   检查并安装最新稳定版
+  update check             仅检查更新
+  update rollback          回退到上一版本
+
 其他:
   version                 打印版本号
   help [命令]             显示帮助
@@ -160,6 +167,7 @@ func printHelp(w io.Writer) {
   GROK_SWITCH_API_KEY     非交互 API Key
   NO_COLOR=1              禁用颜色
   GROK_SWITCH_NO_TUI=1      禁用全屏 TUI
+  GROK_SWITCH_UPDATE_MODE notify（默认）| auto | off
 
 `, bin, bin, bin, bin)
 }
@@ -193,11 +201,13 @@ _grok_switch() {
   local cur cmds
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
-  cmds="tui add edit delete show list use status official test import-current backup version help completion"
+  cmds="tui add edit delete show list use status official test import-current backup update version help completion"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "${cmds}" -- ${cur}) )
   elif [[ ${COMP_WORDS[1]} == "backup" && ${COMP_CWORD} -eq 2 ]]; then
     COMPREPLY=( $(compgen -W "list restore prune" -- ${cur}) )
+  elif [[ ${COMP_WORDS[1]} == "update" && ${COMP_CWORD} -eq 2 ]]; then
+    COMPREPLY=( $(compgen -W "check rollback" -- ${cur}) )
   fi
 }
 complete -F _grok_switch grok-switch
@@ -207,17 +217,20 @@ const zshCompletion = `#compdef grok-switch
 _arguments '1: :->cmds' '*: :->args'
 case $state in
   cmds)
-    _values 'command' tui add edit delete show list use status official test import-current backup version help completion
+    _values 'command' tui add edit delete show list use status official test import-current backup update version help completion
     ;;
   args)
     if [[ ${words[2]} == backup ]]; then
       _values 'backup' list restore prune
+    elif [[ ${words[2]} == update ]]; then
+      _values 'update' check rollback
     fi
     ;;
 esac
 `
 
 const fishCompletion = `complete -c grok-switch -f
-complete -c grok-switch -n __fish_use_subcommand -a "tui add edit delete show list use status official test import-current backup version help completion"
+complete -c grok-switch -n __fish_use_subcommand -a "tui add edit delete show list use status official test import-current backup update version help completion"
 complete -c grok-switch -n "__fish_seen_subcommand_from backup" -a "list restore prune"
+complete -c grok-switch -n "__fish_seen_subcommand_from update" -a "check rollback"
 `

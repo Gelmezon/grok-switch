@@ -38,6 +38,9 @@ func TestResolveDefaults(t *testing.T) {
 	if p.LockFile != filepath.Join(tmp, ".grok_switch", "grok-switch.lock") {
 		t.Errorf("LockFile = %q", p.LockFile)
 	}
+	if p.UpdateStateFile != filepath.Join(tmp, ".grok_switch", "update-state.json") {
+		t.Errorf("UpdateStateFile = %q", p.UpdateStateFile)
+	}
 }
 
 func TestResolveEnvOverrides(t *testing.T) {

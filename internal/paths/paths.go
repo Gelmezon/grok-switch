@@ -8,20 +8,22 @@ import (
 
 // Paths holds resolved filesystem locations for the switcher.
 type Paths struct {
-	GrokHome       string
-	GrokConfig     string
-	SwitchHome     string
-	ProfilesFile   string
-	BackupsDir     string
-	LockFile       string
+	GrokHome        string
+	GrokConfig      string
+	SwitchHome      string
+	ProfilesFile    string
+	BackupsDir      string
+	LockFile        string
+	UpdateStateFile string
 }
 
 // Resolve returns paths based on environment variables and defaults.
 //
 // Priority:
-//   GROK_HOME         → ~/.grok
-//   GROK_CONFIG       → $GROK_HOME/config.toml
-//   GROK_SWITCH_HOME  → ~/.grok_switch
+//
+//	GROK_HOME         → ~/.grok
+//	GROK_CONFIG       → $GROK_HOME/config.toml
+//	GROK_SWITCH_HOME  → ~/.grok_switch
 func Resolve() (Paths, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -33,12 +35,13 @@ func Resolve() (Paths, error) {
 	switchHome := envOr("GROK_SWITCH_HOME", filepath.Join(home, ".grok_switch"))
 
 	return Paths{
-		GrokHome:     grokHome,
-		GrokConfig:   grokConfig,
-		SwitchHome:   switchHome,
-		ProfilesFile: filepath.Join(switchHome, "profiles.json"),
-		BackupsDir:   filepath.Join(switchHome, "backups"),
-		LockFile:     filepath.Join(switchHome, "grok-switch.lock"),
+		GrokHome:        grokHome,
+		GrokConfig:      grokConfig,
+		SwitchHome:      switchHome,
+		ProfilesFile:    filepath.Join(switchHome, "profiles.json"),
+		BackupsDir:      filepath.Join(switchHome, "backups"),
+		LockFile:        filepath.Join(switchHome, "grok-switch.lock"),
+		UpdateStateFile: filepath.Join(switchHome, "update-state.json"),
 	}, nil
 }
 

@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Grok Build 中间站切换工具</strong><br>
-  单二进制 · 零依赖 · CLI + 全屏 TUI · Linux amd64 / arm64
+  单二进制 · 零依赖 · 自动更新 · CLI + 全屏 TUI · Linux amd64 / arm64
 </p>
 
 <p align="center">
@@ -35,6 +35,14 @@ grok-switch          # 启动全屏 TUI
 | `GROK_SWITCH_REPO` | 覆盖仓库 | 默认 `Gelmezon/grok-switch` |
 
 脚本源码：[`scripts/install.sh`](scripts/install.sh)
+
+安装脚本会同时下载 `SHA256SUMS` 并在写入目标目录前完成校验。
+
+如需无需 `sudo` 的自动更新，建议安装到用户目录并确认该目录已加入 `PATH`：
+
+```bash
+INSTALL_DIR="$HOME/.local/bin" bash scripts/install.sh
+```
 
 ---
 
@@ -99,6 +107,7 @@ grok-switch tui
 | `o` | 切回官方认证 |
 | `b` | 备份管理 |
 | `s` | 当前状态 |
+| `U` | 检查更新并在 TUI 内安装 |
 | `/` | 搜索 |
 | `Tab` | 切换面板焦点 |
 | `?` | 帮助 |
@@ -124,6 +133,11 @@ grok-switch official
 grok-switch backup list
 grok-switch backup restore <文件名>
 grok-switch backup prune --keep 10
+
+# 程序更新
+grok-switch update check
+grok-switch update
+grok-switch update rollback
 ```
 
 > 不支持 `--api-key` 参数，避免 Key 进入 shell history / `ps`。
@@ -139,6 +153,7 @@ grok-switch backup prune --keep 10
 | `use` / `status` / `official` | 切换与状态 |
 | `import-current <name>` | 从当前 config.toml 导入 |
 | `backup list\|restore\|prune` | 备份 |
+| `update check` / `update` / `update rollback` | 检查、安装和回退程序版本 |
 | `version` / `help` / `completion` | 杂项 |
 
 **全局标志：** `--no-interactive`、`--json`（list 等）
@@ -153,6 +168,8 @@ grok-switch backup prune --keep 10
 | `GROK_CONFIG` | 配置文件路径 | `$GROK_HOME/config.toml` |
 | `GROK_SWITCH_HOME` | 本工具数据目录 | `~/.grok_switch` |
 | `GROK_SWITCH_API_KEY` | 非交互 API Key | — |
+| `GROK_SWITCH_UPDATE_MODE` | 更新模式：`notify` / `auto` / `off` | `notify` |
+| `GROK_SWITCH_NO_UPDATE_CHECK` | 禁止 TUI 启动时检查更新 | — |
 | `NO_COLOR` | 禁用颜色 | — |
 | `GROK_SWITCH_NO_TUI` | 禁用全屏 TUI | — |
 
@@ -163,6 +180,25 @@ grok-switch backup prune --keep 10
 - API Key 不入参数、日志、history
 - 数据目录 `0700`，敏感文件 `0600`，入口 `umask(0077)`
 - 原子写入 + 切换前备份 + `flock` 并发保护
+
+## 自动更新
+
+TUI 启动后会异步检查 GitHub 最新稳定版，检查结果缓存 24 小时，不会阻塞主界面。按 `U` 可随时强制检查；发现新版本后会直接在 TUI 内弹出确认框并完成安装。
+
+```bash
+grok-switch update check          # 强制联网检查
+grok-switch update                # 交互确认后更新
+grok-switch update --yes          # 非交互更新
+grok-switch update rollback       # 回退到保留的上一版本
+```
+
+更新器会按当前架构选择 Release 二进制，验证 SHA-256 和二进制内版本号，再通过同目录原子替换完成安装。当前版本会保留为 `grok-switch.previous`。
+
+`GROK_SWITCH_UPDATE_MODE=auto` 可启用自动安装，但目标程序必须对当前用户可写。默认安装到 `/usr/local/bin` 时通常需要：
+
+```bash
+sudo grok-switch update
+```
 
 ## 退出码
 
@@ -193,14 +229,6 @@ sudo make install   # → /usr/local/bin/grok-switch
 **要求：** Go 1.24+
 
 推送 tag `v*` 会触发 GitHub Actions，自动构建并发布 Release（含上述三个文件）。
-
----
-
-## 文档
-
-- [project.md](./project.md) — 实施与架构
-- [project-ui.md](./project-ui.md) — 终端 UI 设计
-- [LINUX_SWITCHER_DEVELOPMENT.md](./LINUX_SWITCHER_DEVELOPMENT.md) — 开发规范
 
 ---
 

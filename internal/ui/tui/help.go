@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // HelpModel is an overlay help panel.
@@ -59,7 +59,7 @@ func (m *HelpModel) View() string {
 		theme.Accent.Render("主界面快捷键"),
 		theme.Muted.Render("─────────────────────────────────────────────────────────"),
 		"  ↑↓/jk 选择  Enter 切换  Tab 面板  a 添加  e 编辑  d 删除",
-		"  t 测试模型  o 官方  b 备份  s 状态  / 搜索  r 刷新  ? 帮助  q 退出",
+		"  t 测试模型  o 官方  b 备份  s 状态  / 搜索  r 刷新  U 检查/更新  ? 帮助  q 退出",
 		"",
 		theme.Help.Render("q / Esc 关闭帮助"),
 	}

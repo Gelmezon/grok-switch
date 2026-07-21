@@ -21,4 +21,6 @@ type (
 	ErrMsg struct{ Err error }
 	// InfoMsg is a transient success/info banner.
 	InfoMsg struct{ Text string }
+	// requestUpdateMsg asks the root app to install a previously discovered update.
+	requestUpdateMsg struct{}
 )

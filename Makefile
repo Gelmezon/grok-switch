@@ -1,6 +1,6 @@
 APP     := grok-switch
 DIST    := dist
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0)
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X github.com/Gelmezon/grok-switch/internal/cli.Version=$(VERSION)
 
 .PHONY: test race vet build release clean install

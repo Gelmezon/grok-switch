@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -35,6 +37,12 @@ jobs:
             -trimpath -ldflags="${LDFLAGS}" \
             -o dist/grok-switch-linux-arm64 ./cmd/grok-switch
           cd dist && sha256sum grok-switch-linux-* > SHA256SUMS
+
+      - name: Attest release binaries
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest@v4
+        with:
+          subject-path: 'dist/grok-switch-linux-*'
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')

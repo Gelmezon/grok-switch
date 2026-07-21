@@ -1,16 +1,18 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Gelmezon/grok-switch/internal/paths"
 	"github.com/Gelmezon/grok-switch/internal/probe"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
 	"github.com/Gelmezon/grok-switch/internal/ui"
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
+	"github.com/Gelmezon/grok-switch/internal/updater"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // App is the root Bubbletea model with a screen stack.
@@ -21,6 +23,8 @@ type App struct {
 	stack   []Screen
 	width   int
 	height  int
+	updates *updater.Service
+	update  *updater.Info
 }
 
 // Config for launching the TUI.
@@ -42,6 +46,7 @@ func Run(cfg Config) error {
 		paths:   cfg.Paths,
 		store:   cfg.Store,
 		stack:   []Screen{home},
+		updates: updater.NewService(cfg.Version, cfg.Paths.UpdateStateFile),
 	}
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	_, err = p.Run()
@@ -61,10 +66,14 @@ func loadHome(cfg Config) (*HomeModel, error) {
 }
 
 func (a *App) Init() tea.Cmd {
+	var cmds []tea.Cmd
 	if len(a.stack) > 0 {
-		return a.stack[len(a.stack)-1].Init()
+		cmds = append(cmds, a.stack[len(a.stack)-1].Init())
 	}
-	return nil
+	if cmd := a.checkUpdateCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return tea.Batch(cmds...)
 }
 
 func (a *App) push(s Screen) tea.Cmd {
@@ -107,6 +116,14 @@ func (a *App) setToast(text string) {
 	}
 }
 
+func (a *App) setAvailableUpdate(version string) {
+	for i := range a.stack {
+		if h, ok := a.stack[i].(*HomeModel); ok {
+			h.SetAvailableUpdate(version)
+		}
+	}
+}
+
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -124,8 +141,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DoneMsg:
 		a.pop()
 		a.refreshHome()
-		if info, ok := msg.Payload.(InfoMsg); ok {
-			a.setToast(info.Text)
+		switch payload := msg.Payload.(type) {
+		case InfoMsg:
+			a.setToast(payload.Text)
+		case updateInstalledMsg:
+			a.update = nil
+			a.setAvailableUpdate("")
+			a.setToast(fmt.Sprintf("已更新到 %s，退出并重新启动后生效", payload.Result.Version))
+		case updateInstallFailedMsg:
+			a.setToast(theme.SymFail + "  " + payload.Err.Error())
 		}
 		return a, nil
 
@@ -146,6 +170,35 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			b.status = msg.Text
 		}
 		return a, nil
+
+	case updateAvailableMsg:
+		a.update = &msg.Info
+		a.setAvailableUpdate(msg.Info.LatestVersion)
+		if msg.AutoErr != nil {
+			a.setToast(fmt.Sprintf("发现 %s；自动更新失败：%v", msg.Info.LatestVersion, msg.AutoErr))
+		} else {
+			a.setToast(fmt.Sprintf("发现新版本 %s，按 U 更新", msg.Info.LatestVersion))
+		}
+		return a, nil
+
+	case updateInstalledMsg:
+		a.update = nil
+		a.setAvailableUpdate("")
+		a.setToast(fmt.Sprintf("已更新到 %s，退出并重新启动后生效", msg.Result.Version))
+		return a, nil
+
+	case updateManualCheckMsg:
+		if msg.Err != nil {
+			a.setToast(theme.SymFail + "  检查更新失败：" + msg.Err.Error())
+			return a, nil
+		}
+		if !msg.Info.Available {
+			a.setToast(fmt.Sprintf("当前已是最新版本 %s", msg.Info.CurrentVersion))
+			return a, nil
+		}
+		a.update = &msg.Info
+		a.setAvailableUpdate(msg.Info.LatestVersion)
+		return a, a.push(a.newUpdateConfirm(msg.Info))
 
 	case pushHelpMsg:
 		return a, a.push(NewHelp())
@@ -224,6 +277,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return ErrMsg{Err: fmt.Errorf("测试失败 %s: %s", p.Name, r.Message)}
 		}
 
+	case requestUpdateMsg:
+		if a.update == nil {
+			a.setToast("正在检查更新…")
+			return a, a.checkUpdateNowCmd()
+		}
+		info := *a.update
+		return a, a.push(a.newUpdateConfirm(info))
+
 	case requestBackupMsg:
 		return a, a.push(NewBackupScreen(a.paths.BackupsDir, a.paths.GrokConfig, a.doRestore, a.doPrune))
 
@@ -243,6 +304,79 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := top.Update(msg)
 	a.stack[len(a.stack)-1] = next
 	return a, cmd
+}
+
+type updateAvailableMsg struct {
+	Info    updater.Info
+	AutoErr error
+}
+
+type updateInstalledMsg struct {
+	Result updater.InstallResult
+}
+
+type updateInstallFailedMsg struct {
+	Err error
+}
+
+type updateManualCheckMsg struct {
+	Info updater.Info
+	Err  error
+}
+
+func (a *App) checkUpdateCmd() tea.Cmd {
+	mode := updater.ModeFromEnv()
+	if mode == updater.ModeOff || a.updates == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		info, err := a.updates.Check(ctx, true)
+		cancel()
+		if err != nil || !info.Available {
+			// Startup checks are best-effort and must never disrupt the TUI.
+			return nil
+		}
+		if mode != updater.ModeAuto {
+			return updateAvailableMsg{Info: info}
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), 3*time.Minute)
+		result, err := a.updates.Apply(ctx, info)
+		cancel()
+		if err != nil {
+			return updateAvailableMsg{Info: info, AutoErr: err}
+		}
+		return updateInstalledMsg{Result: result}
+	}
+}
+
+func (a *App) checkUpdateNowCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		info, err := a.updates.Check(ctx, false)
+		return updateManualCheckMsg{Info: info, Err: err}
+	}
+}
+
+func (a *App) newUpdateConfirm(info updater.Info) Screen {
+	body := fmt.Sprintf("当前版本  %s\n最新版本  %s\n\n将下载、校验并原子替换当前程序。\n上一版本会保留用于回退。",
+		info.CurrentVersion, info.LatestVersion)
+	return NewConfirm("更新 grok-switch", body, "确认更新", true, func() tea.Cmd {
+		return a.installUpdateCmd(info)
+	})
+}
+
+func (a *App) installUpdateCmd(info updater.Info) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		result, err := a.updates.Apply(ctx, info)
+		if err != nil {
+			return DoneMsg{Payload: updateInstallFailedMsg{Err: err}}
+		}
+		return DoneMsg{Payload: updateInstalledMsg{Result: result}}
+	}
 }
 
 func (a *App) doCreate(p profiles.Profile) tea.Cmd {
