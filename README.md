@@ -1,8 +1,10 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # grok-switch
 
 <p align="center">
-  <strong>Grok Build 中间站切换工具</strong><br>
-  单二进制 · 零依赖 · 自动更新 · CLI + 全屏 TUI · Linux amd64 / arm64
+  <strong>Grok Build Relay Switcher</strong><br>
+  Single binary · Zero dependencies · Self-updating · CLI + full-screen TUI · Linux amd64 / arm64
 </p>
 
 <p align="center">
@@ -13,32 +15,32 @@
 
 ---
 
-## 一键安装（推荐）
+## One-line installation (recommended)
 
-在 **Linux** 上执行下面这一行即可：自动识别架构、从最新 Release 下载二进制并安装到 `/usr/local/bin`。
+Run the following command on **Linux**. It detects the system architecture, downloads the latest release, and installs the binary to `/usr/local/bin`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Gelmezon/grok-switch/main/scripts/install.sh | sudo bash
 ```
 
-装好后验证：
+Verify the installation:
 
 ```bash
 grok-switch version
-grok-switch          # 启动全屏 TUI
+grok-switch          # Start the full-screen TUI
 ```
 
-| 可选参数 | 说明 | 示例 |
+| Option | Description | Example |
 |---|---|---|
-| `VERSION` | 指定版本（默认 `latest`） | `VERSION=v0.1.0 sudo -E bash -c 'curl -fsSL ... \| bash'` |
-| `INSTALL_DIR` | 安装目录（默认 `/usr/local/bin`） | `INSTALL_DIR=$HOME/.local/bin bash scripts/install.sh` |
-| `GROK_SWITCH_REPO` | 覆盖仓库 | 默认 `Gelmezon/grok-switch` |
+| `VERSION` | Install a specific version (default: `latest`) | `VERSION=v0.1.0 sudo -E bash -c 'curl -fsSL ... \| bash'` |
+| `INSTALL_DIR` | Installation directory (default: `/usr/local/bin`) | `INSTALL_DIR=$HOME/.local/bin bash scripts/install.sh` |
+| `GROK_SWITCH_REPO` | Override the GitHub repository | Default: `Gelmezon/grok-switch` |
 
-脚本源码：[`scripts/install.sh`](scripts/install.sh)
+Installer source: [`scripts/install.sh`](scripts/install.sh)
 
-安装脚本会同时下载 `SHA256SUMS` 并在写入目标目录前完成校验。
+The installer downloads `SHA256SUMS` and verifies the binary before writing it to the destination directory.
 
-如需无需 `sudo` 的自动更新，建议安装到用户目录并确认该目录已加入 `PATH`：
+For self-updates without `sudo`, install to a user-writable directory and ensure that directory is in your `PATH`:
 
 ```bash
 INSTALL_DIR="$HOME/.local/bin" bash scripts/install.sh
@@ -46,176 +48,176 @@ INSTALL_DIR="$HOME/.local/bin" bash scripts/install.sh
 
 ---
 
-## 从 Release 手动下载
+## Manual release download
 
-最新包：[Releases](https://github.com/Gelmezon/grok-switch/releases/latest)
+Latest build: [Releases](https://github.com/Gelmezon/grok-switch/releases/latest)
 
-| 架构 | 文件 |
+| Architecture | File |
 |---|---|
 | Linux x86_64 | [`grok-switch-linux-amd64`](https://github.com/Gelmezon/grok-switch/releases/latest/download/grok-switch-linux-amd64) |
 | Linux arm64 | [`grok-switch-linux-arm64`](https://github.com/Gelmezon/grok-switch/releases/latest/download/grok-switch-linux-arm64) |
-| 校验 | [`SHA256SUMS`](https://github.com/Gelmezon/grok-switch/releases/latest/download/SHA256SUMS) |
+| Checksums | [`SHA256SUMS`](https://github.com/Gelmezon/grok-switch/releases/latest/download/SHA256SUMS) |
 
 ```bash
-# amd64 示例
+# amd64 example
 wget https://github.com/Gelmezon/grok-switch/releases/latest/download/grok-switch-linux-amd64
 chmod +x grok-switch-linux-amd64
 sudo mv grok-switch-linux-amd64 /usr/local/bin/grok-switch
 
-# 可选校验
+# Optional checksum verification
 wget https://github.com/Gelmezon/grok-switch/releases/latest/download/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ---
 
-## 这是什么？
+## What is it?
 
-`grok-switch` 管理多个 **Grok Build 中间站 Profile**，在它们与官方认证之间安全切换 `~/.grok/config.toml`。
+`grok-switch` manages multiple **Grok Build relay profiles** and safely switches `~/.grok/config.toml` between those profiles and the official authentication configuration.
 
-- 无桌面 / Web / OAuth 依赖，**一个静态二进制**
-- TTY 下全屏 TUI；管道 / CI 自动纯文本
-- 切换前自动备份，失败可回滚
+- **One static binary** with no desktop, web, or OAuth dependencies
+- Full-screen TUI in a terminal; automatic plain-text output in pipes and CI
+- Automatic backup before every switch, with rollback support on failure
 
 ```bash
-grok-switch add relay-a      # 添加中间站供应商
-grok-switch list             # 列出供应商（含默认官方）
-grok-switch use relay-a      # 切换供应商
-grok-switch test relay-a     # 测试模型连通性
-grok-switch status           # 查看状态
-grok-switch official         # 切回官方（默认配置）
-grok-switch backup list      # 备份
+grok-switch add relay-a      # Add a relay provider
+grok-switch list             # List providers, including the official default
+grok-switch use relay-a      # Switch providers
+grok-switch test relay-a     # Test model connectivity
+grok-switch status           # Show current status
+grok-switch official         # Return to the official configuration
+grok-switch backup list      # List backups
 ```
 
 ---
 
-## 快速开始
+## Quick start
 
-### 全屏 TUI（推荐）
+### Full-screen TUI (recommended)
 
 ```bash
 grok-switch
-# 或
+# or
 grok-switch tui
 ```
 
-| 按键 | 操作 |
+| Key | Action |
 |---|---|
-| `↑↓` / `jk` | 选择 Profile |
-| `Enter` | 切换到选中项 |
-| `a` / `e` / `d` | 添加 / 编辑 / 删除 |
-| `o` | 切回官方认证 |
-| `b` | 备份管理 |
-| `s` | 当前状态 |
-| `U` | 检查更新并在 TUI 内安装 |
-| `/` | 搜索 |
-| `Tab` | 切换面板焦点 |
-| `?` | 帮助 |
-| `q` | 退出 |
+| `↑↓` / `jk` | Select a profile |
+| `Enter` | Switch to the selected profile |
+| `a` / `e` / `d` | Add / edit / delete |
+| `o` | Return to official authentication |
+| `b` | Manage backups |
+| `s` | Show current status |
+| `U` | Check for and install updates in the TUI |
+| `/` | Search |
+| `Tab` | Change panel focus |
+| `?` | Show help |
+| `q` | Quit |
 
-### CLI 常用命令
+### Common CLI commands
 
 ```bash
-# 交互添加
+# Interactive add
 grok-switch add relay-a
 
-# 非交互添加（CI）
+# Non-interactive add (CI)
 GROK_SWITCH_API_KEY='sk-xxx' grok-switch add relay-a \
   --base-url https://relay.example.com/v1 \
   --model grok-4
 
-# 切换 / 状态 / 官方
+# Switch / status / official configuration
 grok-switch use relay-a
 grok-switch status
 grok-switch official
 
-# 备份
+# Backups
 grok-switch backup list
-grok-switch backup restore <文件名>
+grok-switch backup restore <filename>
 grok-switch backup prune --keep 10
 
-# 程序更新
+# Application updates
 grok-switch update check
 grok-switch update
 grok-switch update rollback
 ```
 
-> 不支持 `--api-key` 参数，避免 Key 进入 shell history / `ps`。
+> There is intentionally no `--api-key` option, preventing API keys from appearing in shell history or `ps` output.
 
 ---
 
-## 命令一览
+## Command reference
 
-| 命令 | 说明 |
+| Command | Description |
 |---|---|
-| `grok-switch` / `tui` | 全屏 TUI |
-| `add` / `edit` / `delete` / `show` / `list` | Profile 管理 |
-| `use` / `status` / `official` | 切换与状态 |
-| `import-current <name>` | 从当前 config.toml 导入 |
-| `backup list\|restore\|prune` | 备份 |
-| `update check` / `update` / `update rollback` | 检查、安装和回退程序版本 |
-| `version` / `help` / `completion` | 杂项 |
+| `grok-switch` / `tui` | Start the full-screen TUI |
+| `add` / `edit` / `delete` / `show` / `list` | Manage profiles |
+| `use` / `status` / `official` | Switch configurations and inspect status |
+| `import-current <name>` | Import the current `config.toml` as a profile |
+| `backup list\|restore\|prune` | Manage backups |
+| `update check` / `update` / `update rollback` | Check, install, or roll back application updates |
+| `version` / `help` / `completion` | Utilities |
 
-**全局标志：** `--no-interactive`、`--json`（list 等）
+**Global flags:** `--no-interactive`, `--json` where supported (for example, `list`).
 
 ---
 
-## 环境变量
+## Environment variables
 
-| 变量 | 说明 | 默认 |
+| Variable | Description | Default |
 |---|---|---|
-| `GROK_HOME` | Grok 配置目录 | `~/.grok` |
-| `GROK_CONFIG` | 配置文件路径 | `$GROK_HOME/config.toml` |
-| `GROK_SWITCH_HOME` | 本工具数据目录 | `~/.grok_switch` |
-| `GROK_SWITCH_API_KEY` | 非交互 API Key | — |
-| `GROK_SWITCH_UPDATE_MODE` | 更新模式：`notify` / `auto` / `off` | `notify` |
-| `GROK_SWITCH_NO_UPDATE_CHECK` | 禁止 TUI 启动时检查更新 | — |
-| `NO_COLOR` | 禁用颜色 | — |
-| `GROK_SWITCH_NO_TUI` | 禁用全屏 TUI | — |
+| `GROK_HOME` | Grok configuration directory | `~/.grok` |
+| `GROK_CONFIG` | Grok configuration file | `$GROK_HOME/config.toml` |
+| `GROK_SWITCH_HOME` | grok-switch data directory | `~/.grok_switch` |
+| `GROK_SWITCH_API_KEY` | API key for non-interactive commands | — |
+| `GROK_SWITCH_UPDATE_MODE` | Update mode: `notify`, `auto`, or `off` | `notify` |
+| `GROK_SWITCH_NO_UPDATE_CHECK` | Disable update checks when the TUI starts | — |
+| `NO_COLOR` | Disable colored output | — |
+| `GROK_SWITCH_NO_TUI` | Disable the full-screen TUI | — |
 
 ---
 
-## 安全要点
+## Security
 
-- API Key 不入参数、日志、history
-- 数据目录 `0700`，敏感文件 `0600`，入口 `umask(0077)`
-- 原子写入 + 切换前备份 + `flock` 并发保护
+- API keys never appear in command-line arguments, logs, or shell history
+- Data directories use mode `0700`, sensitive files use `0600`, and the process starts with `umask(0077)`
+- Atomic writes, pre-switch backups, and `flock`-based concurrency protection
 
-## 自动更新
+## Self-updates
 
-TUI 启动后会异步检查 GitHub 最新稳定版，检查结果缓存 24 小时，不会阻塞主界面。按 `U` 可随时强制检查；发现新版本后会直接在 TUI 内弹出确认框并完成安装。
+The TUI checks the latest stable GitHub release asynchronously at startup and caches the result for 24 hours without blocking the main screen. Press `U` to force a check at any time; when an update is available, the TUI opens a confirmation dialog and completes the installation in place.
 
 ```bash
-grok-switch update check          # 强制联网检查
-grok-switch update                # 交互确认后更新
-grok-switch update --yes          # 非交互更新
-grok-switch update rollback       # 回退到保留的上一版本
+grok-switch update check          # Force an online check
+grok-switch update                # Check and update with confirmation
+grok-switch update --yes          # Update non-interactively
+grok-switch update rollback       # Restore the retained previous version
 ```
 
-更新器会按当前架构选择 Release 二进制，验证 SHA-256 和二进制内版本号，再通过同目录原子替换完成安装。当前版本会保留为 `grok-switch.previous`。
+The updater selects the release binary for the current architecture, verifies its SHA-256 digest and embedded version, then performs an atomic replacement in the same directory. The previous binary is retained as `grok-switch.previous`.
 
-`GROK_SWITCH_UPDATE_MODE=auto` 可启用自动安装，但目标程序必须对当前用户可写。默认安装到 `/usr/local/bin` 时通常需要：
+Set `GROK_SWITCH_UPDATE_MODE=auto` to enable automatic installation. The target binary must be writable by the current user. A default installation in `/usr/local/bin` will usually require:
 
 ```bash
 sudo grok-switch update
 ```
 
-## 退出码
+## Exit codes
 
-| 码 | 含义 |
+| Code | Meaning |
 |---:|---|
-| 0 | 成功 |
-| 1 | 运行错误 |
-| 2 | 用法错误 |
-| 3 | status：磁盘与 Profile 不一致 |
-| 4 | Profile 不存在 |
-| 5 | 锁超时 |
-| 6 | 配置解析失败 |
-| 7 | 备份/恢复失败 |
+| 0 | Success |
+| 1 | Runtime error |
+| 2 | Usage error |
+| 3 | `status`: on-disk configuration does not match the active profile |
+| 4 | Profile not found |
+| 5 | Lock timeout |
+| 6 | Configuration parsing failed |
+| 7 | Backup or restore failed |
 
 ---
 
-## 从源码构建
+## Build from source
 
 ```bash
 git clone https://github.com/Gelmezon/grok-switch.git
@@ -226,9 +228,9 @@ make test && make vet
 sudo make install   # → /usr/local/bin/grok-switch
 ```
 
-**要求：** Go 1.24+
+**Requirements:** Go 1.24+
 
-推送 tag `v*` 会触发 GitHub Actions，自动构建并发布 Release（含上述三个文件）。
+Pushing a `v*` tag triggers GitHub Actions to build and publish a release containing the two Linux binaries and `SHA256SUMS`.
 
 ---
 
@@ -236,4 +238,4 @@ sudo make install   # → /usr/local/bin/grok-switch
 
 MIT
 
-**作者：** DavidZhao · **仓库：** [Gelmezon/grok-switch](https://github.com/Gelmezon/grok-switch)
+**Author:** DavidZhao · **Repository:** [Gelmezon/grok-switch](https://github.com/Gelmezon/grok-switch)
