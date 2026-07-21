@@ -10,9 +10,12 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"time"
+
 	"github.com/Gelmezon/grok-switch/internal/config"
 	"github.com/Gelmezon/grok-switch/internal/exitcodes"
 	"github.com/Gelmezon/grok-switch/internal/paths"
+	"github.com/Gelmezon/grok-switch/internal/probe"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
 	"github.com/Gelmezon/grok-switch/internal/secret"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
@@ -44,7 +47,7 @@ func setup() (*appContext, error) {
 func resolveProfile(store profiles.ProfileStore, nameOrID string) (profiles.Profile, error) {
 	nameOrID = strings.TrimSpace(nameOrID)
 	if nameOrID == "" {
-		return profiles.Profile{}, &exitcodes.UsageError{Msg: "请指定 Profile 名称或 ID"}
+		return profiles.Profile{}, &exitcodes.UsageError{Msg: "请指定供应商名称或 ID"}
 	}
 	if p, err := store.Get(nameOrID); err == nil {
 		return p, nil
@@ -62,7 +65,7 @@ func resolveProfile(store profiles.ProfileStore, nameOrID string) (profiles.Prof
 			ids = append(ids, m.ID)
 		}
 		return profiles.Profile{}, &exitcodes.UsageError{
-			Msg: fmt.Sprintf("存在多个名为 %q 的 Profile，请改用 ID: %s", nameOrID, strings.Join(ids, ", ")),
+			Msg: fmt.Sprintf("存在多个名为 %q 的供应商，请改用 ID: %s", nameOrID, strings.Join(ids, ", ")),
 		}
 	}
 	return matches[0], nil
@@ -115,7 +118,41 @@ func runStatus(args []string) error {
 	}
 	fmt.Print(ui.RenderStatus(st, Version))
 	if st.HasActive && !st.DiskMatches {
-		return &exitcodes.MismatchError{Msg: "磁盘配置与活动 Profile 不匹配"}
+		return &exitcodes.MismatchError{Msg: "磁盘配置与活动供应商不匹配"}
+	}
+	return nil
+}
+
+func runTest(args []string) error {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	timeout := fs.Duration("timeout", 20*time.Second, "")
+	if err := fs.Parse(flagsAfterPositional(args)); err != nil {
+		return &exitcodes.UsageError{Msg: err.Error()}
+	}
+	pos := fs.Args()
+	if len(pos) < 1 {
+		return &exitcodes.UsageError{Msg: "用法: grok-switch test <name-or-id>"}
+	}
+	ctx, err := setup()
+	if err != nil {
+		return err
+	}
+	p, err := resolveProfile(ctx.Store, pos[0])
+	if err != nil {
+		return err
+	}
+	var result probe.Result
+	err = ui.WithSpinner(fmt.Sprintf("正在测试 %s / %s ...", p.Name, p.DefaultModel), func() error {
+		result = probe.TestModel(p.BaseURL, p.APIKey, p.DefaultModel, *timeout)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Print(ui.RenderTestResult(p.Name, result))
+	if !result.OK {
+		return fmt.Errorf("%s", result.Message)
 	}
 	return nil
 }
@@ -180,7 +217,7 @@ func runUse(args []string) error {
 			from = st.Profile.Name + "  " + st.Profile.DefaultModel
 		}
 		fmt.Println(theme.BoxWarning.Render(fmt.Sprintf(
-			"%s  切换 Profile\n\n从  %s\n到  %s  %s\n\n备份将自动保存到 %s\n\n确认？ [y/N] ",
+			"%s  切换供应商\n\n从  %s\n到  %s  %s\n\n备份将自动保存到 %s\n\n确认？ [y/N] ",
 			theme.SymWarn, from, p.Name, p.DefaultModel, ctx.Paths.BackupsDir,
 		)))
 		if !confirmYN(false) {
@@ -214,7 +251,7 @@ func runOfficial(args []string) error {
 	}
 	if ui.Interactive() && !*yes {
 		fmt.Println(theme.BoxWarning.Render(fmt.Sprintf(
-			"%s  切回官方认证\n\n将移除中间站相关配置并清除活动 Profile。\n确认？ [y/N]",
+			"%s  切换到官方配置\n\n将移除中间站相关配置并恢复 Grok 官方认证（默认）。\n确认？ [y/N]",
 			theme.SymWarn,
 		)))
 		if !confirmYN(false) {
@@ -296,7 +333,7 @@ func runAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(theme.OK("已添加 Profile " + created.Name + " (id=" + created.ID + ")"))
+	fmt.Println(theme.OK("已添加供应商 " + created.Name + " (id=" + created.ID + ")"))
 	return nil
 }
 
@@ -354,7 +391,7 @@ func runAddPrompts(ctx *appContext, name string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(theme.OK("已添加 Profile " + created.Name))
+	fmt.Println(theme.OK("已添加供应商 " + created.Name))
 	fmt.Printf("  Base URL: %s\n  模型: %s\n  API Key: %s\n", created.BaseURL, created.DefaultModel, secret.MaskSecret(created.APIKey))
 	return nil
 }
@@ -419,7 +456,7 @@ func runEdit(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(theme.OK("已更新 Profile " + updated.Name))
+	fmt.Println(theme.OK("已更新供应商 " + updated.Name))
 	return nil
 }
 
@@ -458,11 +495,11 @@ func runDelete(args []string) error {
 		return err
 	}
 	if p.IsActive {
-		return fmt.Errorf("%s 当前处于活动状态。\n请先执行 grok-switch official 或切换到其他 Profile", p.Name)
+		return fmt.Errorf("%s 当前处于活动状态。\n请先执行 grok-switch official 或切换到其他供应商", p.Name)
 	}
 	if !*yes {
 		fmt.Println(theme.BoxWarning.Render(fmt.Sprintf(
-			"%s  删除 Profile\n\n确定要删除 %s 吗？此操作无法撤销。\n（config.toml 不会被修改）\n\n输入 Profile 名称确认：",
+			"%s  删除供应商\n\n确定要删除 %s 吗？此操作无法撤销。\n（config.toml 不会被修改）\n\n输入供应商名称确认：",
 			theme.SymWarn, p.Name,
 		)))
 		in := bufio.NewReader(os.Stdin)
@@ -475,7 +512,7 @@ func runDelete(args []string) error {
 	if err := ctx.Store.Delete(p.ID); err != nil {
 		return err
 	}
-	fmt.Println(theme.OK("已删除 Profile " + p.Name))
+	fmt.Println(theme.OK("已删除供应商 " + p.Name))
 	return nil
 }
 
@@ -502,7 +539,7 @@ func runImportCurrent(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(theme.OK("已从当前配置导入 Profile " + created.Name + " (id=" + created.ID + ")"))
+	fmt.Println(theme.OK("已从当前配置导入供应商 " + created.Name + " (id=" + created.ID + ")"))
 	if *active {
 		res, err := switcher.Activate(created.ID, ctx.Store, ctx.Paths.GrokConfig, ctx.Paths.BackupsDir)
 		if err != nil {

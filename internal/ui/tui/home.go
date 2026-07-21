@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/Gelmezon/grok-switch/internal/models"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
 	"github.com/Gelmezon/grok-switch/internal/ui"
@@ -20,14 +21,20 @@ const (
 	focusCount
 )
 
-// HomeModel is the main profile browser.
+// listItem is either the built-in official entry or a stored provider.
+type listItem struct {
+	official bool
+	profile  profiles.Profile
+}
+
+// HomeModel is the main provider browser.
 type HomeModel struct {
 	version    string
 	configPath string
 	list       []profiles.Profile
 	status     switcher.Status
 	cursor     int
-	focus      int // focusList | focusDetail | focusOps
+	focus      int
 	filter     string
 	filtering  bool
 	filterBuf  string
@@ -38,7 +45,7 @@ type HomeModel struct {
 }
 
 func NewHome(version, configPath string, list []profiles.Profile, st switcher.Status) *HomeModel {
-	return &HomeModel{
+	m := &HomeModel{
 		version:    version,
 		configPath: configPath,
 		list:       list,
@@ -48,33 +55,51 @@ func NewHome(version, configPath string, list []profiles.Profile, st switcher.St
 		showBanner: true,
 		focus:      focusList,
 	}
+	// Default cursor: official when no mid-station active
+	if !st.HasActive {
+		m.cursor = 0
+	} else {
+		items := m.items()
+		for i, it := range items {
+			if !it.official && it.profile.IsActive {
+				m.cursor = i
+				break
+			}
+		}
+	}
+	return m
 }
 
 func (m *HomeModel) Init() tea.Cmd { return nil }
 
-func (m *HomeModel) filtered() []profiles.Profile {
-	if m.filter == "" {
-		return m.list
-	}
-	var out []profiles.Profile
+// items returns official first, then filtered providers.
+func (m *HomeModel) items() []listItem {
+	out := []listItem{{official: true}}
 	q := strings.ToLower(m.filter)
 	for _, p := range m.list {
-		if strings.Contains(strings.ToLower(p.Name), q) ||
-			strings.Contains(strings.ToLower(p.ID), q) ||
-			strings.Contains(strings.ToLower(p.DefaultModel), q) {
-			out = append(out, p)
+		if q != "" {
+			if !strings.Contains(strings.ToLower(p.Name), q) &&
+				!strings.Contains(strings.ToLower(p.ID), q) &&
+				!strings.Contains(strings.ToLower(p.DefaultModel), q) {
+				continue
+			}
 		}
+		out = append(out, listItem{profile: p})
+	}
+	// When filtering, hide official unless query matches
+	if q != "" && !strings.Contains("官方 official grok", q) {
+		out = out[1:]
 	}
 	return out
 }
 
-func (m *HomeModel) selected() *profiles.Profile {
-	items := m.filtered()
+func (m *HomeModel) selected() *listItem {
+	items := m.items()
 	if len(items) == 0 || m.cursor < 0 || m.cursor >= len(items) {
 		return nil
 	}
-	p := items[m.cursor]
-	return &p
+	it := items[m.cursor]
+	return &it
 }
 
 func (m *HomeModel) Update(msg tea.Msg) (Screen, tea.Cmd) {
@@ -82,7 +107,6 @@ func (m *HomeModel) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Hide full ASCII banner on short terminals to save vertical space.
 		m.showBanner = msg.Height >= 24
 	case InfoMsg:
 		m.toast = msg.Text
@@ -119,12 +143,11 @@ func (m *HomeModel) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			m.focus = (m.focus - 1 + focusCount) % focusCount
 			return m, nil
 		case "up", "k":
-			// Navigation always moves list cursor (detail/ops are read-only panels).
 			if m.cursor > 0 {
 				m.cursor--
 			}
 		case "down", "j":
-			if m.cursor < len(m.filtered())-1 {
+			if m.cursor < len(m.items())-1 {
 				m.cursor++
 			}
 		case "enter":
@@ -132,27 +155,49 @@ func (m *HomeModel) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			if sel == nil {
 				return m, nil
 			}
-			return m, func() tea.Msg { return requestUseMsg{ID: sel.ID, Name: sel.Name} }
+			if sel.official {
+				if !m.status.HasActive {
+					m.toast = "当前已是官方配置"
+					return m, nil
+				}
+				return m, func() tea.Msg { return requestOfficialMsg{} }
+			}
+			return m, func() tea.Msg { return requestUseMsg{ID: sel.profile.ID, Name: sel.profile.Name} }
 		case "a":
 			return m, func() tea.Msg { return requestAddMsg{} }
 		case "e":
 			sel := m.selected()
-			if sel == nil {
+			if sel == nil || sel.official {
+				if sel != nil && sel.official {
+					m.toast = "官方配置无需编辑"
+				}
 				return m, nil
 			}
-			return m, func() tea.Msg { return requestEditMsg{Profile: *sel} }
+			return m, func() tea.Msg { return requestEditMsg{Profile: sel.profile} }
 		case "d":
 			sel := m.selected()
-			if sel == nil {
+			if sel == nil || sel.official {
+				if sel != nil && sel.official {
+					m.toast = "官方配置无法删除"
+				}
 				return m, nil
 			}
-			return m, func() tea.Msg { return requestDeleteMsg{Profile: *sel} }
+			return m, func() tea.Msg { return requestDeleteMsg{Profile: sel.profile} }
 		case "o":
 			return m, func() tea.Msg { return requestOfficialMsg{} }
 		case "b":
 			return m, func() tea.Msg { return requestBackupMsg{} }
 		case "s":
 			return m, func() tea.Msg { return requestStatusMsg{} }
+		case "t":
+			sel := m.selected()
+			if sel == nil || sel.official {
+				if sel != nil && sel.official {
+					m.toast = "官方配置无需连通性测试"
+				}
+				return m, nil
+			}
+			return m, func() tea.Msg { return requestTestMsg{Profile: sel.profile} }
 		case "/":
 			m.filtering = true
 			m.filterBuf = m.filter
@@ -169,7 +214,6 @@ func (m *HomeModel) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return m, nil
 }
 
-// messages for app router
 type (
 	pushHelpMsg        struct{}
 	requestUseMsg      struct{ ID, Name string }
@@ -179,13 +223,14 @@ type (
 	requestOfficialMsg struct{}
 	requestBackupMsg   struct{}
 	requestStatusMsg   struct{}
+	requestTestMsg     struct{ Profile profiles.Profile }
 )
 
 func (m *HomeModel) SetData(list []profiles.Profile, st switcher.Status) {
 	m.list = list
 	m.status = st
-	if m.cursor >= len(m.filtered()) {
-		m.cursor = max(0, len(m.filtered())-1)
+	if m.cursor >= len(m.items()) {
+		m.cursor = max(0, len(m.items())-1)
 	}
 }
 
@@ -197,8 +242,8 @@ func (m *HomeModel) View() string {
 	}
 
 	// Top status bar
-	activeName := "无活动"
-	activeModel := ""
+	activeName := models.OfficialName
+	activeModel := "Grok 官方认证"
 	if m.status.HasActive && m.status.Profile != nil {
 		activeName = m.status.Profile.Name
 		activeModel = m.status.Profile.DefaultModel
@@ -217,7 +262,7 @@ func (m *HomeModel) View() string {
 	top := theme.BoxActive.Width(max(20, m.width-2)).Render(barInner)
 	parts = append(parts, top)
 
-	items := m.filtered()
+	items := m.items()
 	leftW := max(28, m.width/3)
 	rightW := max(30, m.width-leftW-8)
 	contentH := max(10, m.height-12)
@@ -227,25 +272,37 @@ func (m *HomeModel) View() string {
 
 	// Left list
 	var left strings.Builder
-	left.WriteString(theme.Bold.Render(fmt.Sprintf("Profiles  [%d]", len(items))) + "\n\n")
+	providerCount := len(m.list)
+	left.WriteString(theme.Bold.Render(fmt.Sprintf("供应商  [%d]", providerCount)) + "\n\n")
 	if m.filtering {
 		left.WriteString(theme.Accent.Render("/ "+m.filterBuf+"_") + "\n\n")
 	} else if m.filter != "" {
 		left.WriteString(theme.Muted.Render("过滤: "+m.filter) + "\n\n")
 	}
 	if len(items) == 0 {
-		left.WriteString(theme.Muted.Render("  （无 Profile）") + "\n")
+		left.WriteString(theme.Muted.Render("  （无匹配项）") + "\n")
 	}
-	for i, p := range items {
-		mark := theme.SymInactive
-		if p.IsActive {
-			mark = theme.SymActive
+	for i, it := range items {
+		var label string
+		var isActive bool
+		if it.official {
+			isActive = !m.status.HasActive
+			label = fmt.Sprintf("%s %s  官方认证", theme.SymActive, models.OfficialName)
+			if !isActive {
+				label = fmt.Sprintf("%s %s  官方认证", theme.SymInactive, models.OfficialName)
+			}
+		} else {
+			isActive = it.profile.IsActive
+			mark := theme.SymInactive
+			if isActive {
+				mark = theme.SymActive
+			}
+			label = fmt.Sprintf("%s %s  %s", mark, it.profile.Name, ui.Truncate(it.profile.DefaultModel, 12))
 		}
-		label := fmt.Sprintf("%s %s  %s", mark, p.Name, ui.Truncate(p.DefaultModel, 12))
 		var line string
 		if i == m.cursor {
 			line = theme.Selected.Render(theme.SymCursor + " " + label)
-		} else if p.IsActive {
+		} else if isActive {
 			line = "  " + theme.ActiveRow.Render(label)
 		} else {
 			line = "  " + theme.Muted.Render(label)
@@ -260,23 +317,34 @@ func (m *HomeModel) View() string {
 
 	// Right detail
 	var right strings.Builder
-	right.WriteString(theme.Bold.Render("Profile 详情") + "\n\n")
+	right.WriteString(theme.Bold.Render("供应商详情") + "\n\n")
 	sel := m.selected()
 	if sel == nil {
-		right.WriteString(theme.Muted.Render("选择一个 Profile 查看详情") + "\n")
+		right.WriteString(theme.Muted.Render("选择一个供应商查看详情") + "\n")
+	} else if sel.official {
+		right.WriteString(theme.Field("名称", models.OfficialName) + "\n")
+		right.WriteString(theme.Field("类型", "Grok 内置官方认证") + "\n")
+		right.WriteString(theme.Field("说明", "不写入中间站 endpoints/model") + "\n\n")
+		if !m.status.HasActive {
+			right.WriteString(theme.Field("状态", theme.Success.Render(theme.SymActive+" 当前活动（默认）")) + "\n")
+		} else {
+			right.WriteString(theme.Field("状态", theme.Muted.Render(theme.SymInactive+" 非活动")) + "\n")
+		}
+		right.WriteString(theme.Field("配置文件", ui.Truncate(m.configPath, max(12, rightW-16))) + "\n")
 	} else {
-		right.WriteString(theme.Field("名称", sel.Name) + "\n")
-		right.WriteString(theme.Field("Base URL", ui.Truncate(sel.BaseURL, max(12, rightW-16))) + "\n")
-		right.WriteString(theme.Field("模型", sel.DefaultModel) + "\n")
-		right.WriteString(theme.Field("推理等级", sel.DefaultReasoningEffort) + "\n")
-		right.WriteString(theme.Field("搜索模型", sel.WebSearchModel) + "\n")
-		right.WriteString(theme.Field("Explore", sel.SubagentsModels.Explore) + "\n")
-		right.WriteString(theme.Field("Plan", sel.SubagentsModels.Plan) + "\n")
-		right.WriteString(theme.Field("ID", sel.ID) + "\n\n")
-		if sel.IsActive {
+		p := sel.profile
+		right.WriteString(theme.Field("名称", p.Name) + "\n")
+		right.WriteString(theme.Field("Base URL", ui.Truncate(p.BaseURL, max(12, rightW-16))) + "\n")
+		right.WriteString(theme.Field("模型", p.DefaultModel) + "\n")
+		right.WriteString(theme.Field("推理等级", p.DefaultReasoningEffort) + "\n")
+		right.WriteString(theme.Field("搜索模型", p.WebSearchModel) + "\n")
+		right.WriteString(theme.Field("Explore", p.SubagentsModels.Explore) + "\n")
+		right.WriteString(theme.Field("Plan", p.SubagentsModels.Plan) + "\n")
+		right.WriteString(theme.Field("ID", p.ID) + "\n\n")
+		if p.IsActive {
 			right.WriteString(theme.Field("状态", theme.Success.Render(theme.SymActive+" 活动")) + "\n")
 			if m.status.DiskMatches {
-				right.WriteString(theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与 Profile 一致")) + "\n")
+				right.WriteString(theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与供应商一致")) + "\n")
 			} else {
 				right.WriteString(theme.Field("磁盘配置", theme.Warning.Render(theme.SymWarn+" 不一致")) + "\n")
 			}
@@ -290,7 +358,6 @@ func (m *HomeModel) View() string {
 	}
 	detailBox := detailStyle.Width(rightW).Render(right.String())
 
-	// Ops box
 	opsStyle := theme.BoxNormal
 	if m.focus == focusOps {
 		opsStyle = theme.BoxActive
@@ -298,15 +365,15 @@ func (m *HomeModel) View() string {
 	ops := opsStyle.Width(rightW).Render(
 		theme.Bold.Render("操作") + "\n" +
 			"Enter 切换  a 添加  e 编辑\n" +
-			"d 删除      o 官方  b 备份\n" +
-			"s 状态      / 搜索  r 刷新",
+			"d 删除      t 测试  o 官方\n" +
+			"b 备份      s 状态  / 搜索",
 	)
 
 	rightCol := lipgloss.JoinVertical(lipgloss.Left, detailBox, ops)
 	mid := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "  ", rightCol)
 	parts = append(parts, mid)
 
-	help := theme.Help.Render("  ↑↓ 选择  Enter 切换  Tab 切换面板  / 搜索  s 状态  ? 帮助  q 退出")
+	help := theme.Help.Render("  ↑↓ 选择  Enter 切换  Tab 面板  t 测试模型  a 添加  ? 帮助  q 退出")
 	if m.toast != "" {
 		help = theme.Success.Render("  "+theme.SymOK+"  "+m.toast) + "\n" + help
 	}

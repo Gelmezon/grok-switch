@@ -70,11 +70,12 @@ sha256sum -c SHA256SUMS --ignore-missing
 - 切换前自动备份，失败可回滚
 
 ```bash
-grok-switch add relay-a      # 添加中间站
-grok-switch list             # 列出 Profile
-grok-switch use relay-a      # 切换
+grok-switch add relay-a      # 添加中间站供应商
+grok-switch list             # 列出供应商（含默认官方）
+grok-switch use relay-a      # 切换供应商
+grok-switch test relay-a     # 测试模型连通性
 grok-switch status           # 查看状态
-grok-switch official         # 切回官方
+grok-switch official         # 切回官方（默认配置）
 grok-switch backup list      # 备份
 ```
 

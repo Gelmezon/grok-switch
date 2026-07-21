@@ -63,6 +63,8 @@ func Run(args []string) error {
 		return runStatus(rest)
 	case "official":
 		return runOfficial(rest)
+	case "test":
+		return runTest(rest)
 	case "import-current":
 		return runImportCurrent(rest)
 	case "backup":
@@ -126,18 +128,19 @@ func printHelp(w io.Writer) {
   %s tui                 显式启动 TUI
   %s <命令> [参数]
 
-Profile 管理:
-  add [name]              添加中间站 Profile（交互向导）
-  edit <name-or-id>       编辑 Profile
-  delete <name-or-id>     删除 Profile
-  show <name-or-id>       显示 Profile 详情
-  list                    列出所有 Profile
+供应商管理:
+  add [name]              添加中间站供应商（交互向导）
+  edit <name-or-id>       编辑供应商（含高级模型）
+  delete <name-or-id>     删除供应商
+  show <name-or-id>       显示供应商详情
+  list                    列出供应商（含默认官方）
+  test <name-or-id>       测试模型连通性
 
 切换:
-  use <name-or-id>        切换到指定中间站
+  use <name-or-id>        切换到指定供应商
   status                  查看当前配置状态
-  official                切回 Grok 官方认证
-  import-current <name>   从当前 config.toml 导入 Profile
+  official                切回 Grok 官方配置（默认）
+  import-current <name>   从当前 config.toml 导入供应商
 
 备份:
   backup list             查看备份
@@ -190,7 +193,7 @@ _grok_switch() {
   local cur cmds
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
-  cmds="tui add edit delete show list use status official import-current backup version help completion"
+  cmds="tui add edit delete show list use status official test import-current backup version help completion"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "${cmds}" -- ${cur}) )
   elif [[ ${COMP_WORDS[1]} == "backup" && ${COMP_CWORD} -eq 2 ]]; then
@@ -204,7 +207,7 @@ const zshCompletion = `#compdef grok-switch
 _arguments '1: :->cmds' '*: :->args'
 case $state in
   cmds)
-    _values 'command' tui add edit delete show list use status official import-current backup version help completion
+    _values 'command' tui add edit delete show list use status official test import-current backup version help completion
     ;;
   args)
     if [[ ${words[2]} == backup ]]; then
@@ -215,6 +218,6 @@ esac
 `
 
 const fishCompletion = `complete -c grok-switch -f
-complete -c grok-switch -n __fish_use_subcommand -a "tui add edit delete show list use status official import-current backup version help completion"
+complete -c grok-switch -n __fish_use_subcommand -a "tui add edit delete show list use status official test import-current backup version help completion"
 complete -c grok-switch -n "__fish_seen_subcommand_from backup" -a "list restore prune"
 `

@@ -44,3 +44,23 @@ func TestWizardLiveValidateURL(t *testing.T) {
 		t.Fatalf("expected clear err, got %q", m.errMsg)
 	}
 }
+
+func TestWizardAddHasNoAdvancedStep(t *testing.T) {
+	m := NewAddWizard("x", nil)
+	if m.confirmStep() != 4 {
+		t.Fatalf("add confirm step want 4 got %d", m.confirmStep())
+	}
+	if m.totalSteps() != 4 {
+		t.Fatalf("add total steps want 4 got %d", m.totalSteps())
+	}
+}
+
+func TestWizardModelPick(t *testing.T) {
+	m := NewAddWizard("", nil)
+	m.step = 3
+	m.modelIdx = 0
+	if m.selectedModel() == "" {
+		t.Fatal("expected catalog model")
+	}
+}
+

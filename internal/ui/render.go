@@ -5,33 +5,53 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/Gelmezon/grok-switch/internal/models"
+	"github.com/Gelmezon/grok-switch/internal/probe"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
 	"github.com/Gelmezon/grok-switch/internal/secret"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
 )
 
-// RenderProfileList formats profiles for `list` command.
+// RenderProfileList formats providers for `list` command.
+// Always shows built-in official first.
 func RenderProfileList(list []profiles.Profile, version string) string {
 	var b strings.Builder
-	b.WriteString(HeaderLine("Profiles", version) + "\n\n")
-
-	if len(list) == 0 {
-		b.WriteString(theme.Muted.Render("  （无 Profile）") + "\n")
-		return b.String()
-	}
+	b.WriteString(HeaderLine("供应商", version) + "\n\n")
 
 	hi := -1
-	rows := make([][]string, 0, len(list))
+	rows := make([][]string, 0, len(list)+1)
 	activeCount := 0
-	for i, p := range list {
+
+	// Official row
+	officialActive := true
+	for _, p := range list {
+		if p.IsActive {
+			officialActive = false
+			break
+		}
+	}
+	offMark := ""
+	if officialActive {
+		offMark = theme.Success.Render(theme.SymActive)
+		hi = 0
+		activeCount++
+	}
+	rows = append(rows, []string{
+		offMark,
+		models.OfficialName,
+		"官方认证",
+		"—",
+		models.OfficialID,
+	})
+
+	for _, p := range list {
 		active := ""
 		if p.IsActive {
 			active = theme.Success.Render(theme.SymActive)
-			hi = i
+			hi = len(rows)
 			activeCount++
 		}
-		// Pass full URL; Table truncates by terminal width (wide ≥120 keeps more).
 		rows = append(rows, []string{
 			active,
 			p.Name,
@@ -55,7 +75,7 @@ func RenderProfileList(list []profiles.Profile, version string) string {
 	}
 	b.WriteString(tbl.Render())
 	b.WriteString("\n")
-	summary := fmt.Sprintf("  共 %d 个 Profile，%d 个活动中", len(list), activeCount)
+	summary := fmt.Sprintf("  共 %d 个中间站供应商 + 官方配置，%d 个活动中", len(list), activeCount)
 	b.WriteString(theme.Muted.Render(summary) + "\n")
 	return b.String()
 }
@@ -69,35 +89,35 @@ func RenderStatus(st switcher.Status, version string) string {
 	switch {
 	case !st.HasActive:
 		body = joinFields(
-			theme.Muted.Render(theme.SymInactive)+" 无活动 Profile",
+			theme.Success.Render(theme.SymActive)+" 当前配置: "+theme.Bold.Render(models.OfficialName+"（默认）"),
 			"",
 			theme.Field("配置文件", st.ConfigPath),
-			theme.Field("当前配置", "使用 Grok 官方认证"),
+			theme.Field("说明", "使用 Grok 官方认证，无活动中间站供应商"),
 		)
-		body = box(body, "normal")
+		body = box(body, "success")
 	case st.DiskMatches:
 		p := st.Profile
 		body = joinFields(
-			theme.Success.Render(theme.SymActive)+" 活动 Profile: "+theme.Bold.Render(p.Name),
+			theme.Success.Render(theme.SymActive)+" 活动供应商: "+theme.Bold.Render(p.Name),
 			"",
 			theme.Field("配置文件", st.ConfigPath),
 			theme.Field("Base URL", p.BaseURL),
 			theme.Field("默认模型", p.DefaultModel),
 			theme.Field("推理等级", p.DefaultReasoningEffort),
 			"",
-			theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与 Profile 一致")),
+			theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与供应商一致")),
 		)
 		body = box(body, "success")
 	default:
 		p := st.Profile
 		body = joinFields(
-			theme.Warning.Render(theme.SymWarn)+" 活动 Profile: "+p.Name+"（配置不一致）",
+			theme.Warning.Render(theme.SymWarn)+" 活动供应商: "+p.Name+"（配置不一致）",
 			"",
 			theme.Field("配置文件", st.ConfigPath),
-			theme.Field("Profile 期望", p.BaseURL),
+			theme.Field("供应商期望", p.BaseURL),
 			theme.Field("默认模型", p.DefaultModel),
 			"",
-			theme.Field("磁盘配置", theme.Error.Render(theme.SymFail+" 与 Profile 不一致")),
+			theme.Field("磁盘配置", theme.Error.Render(theme.SymFail+" 与供应商不一致")),
 			theme.Field("建议运行", "grok-switch use "+p.Name+"  重新同步"),
 		)
 		body = box(body, "warning")
@@ -123,14 +143,14 @@ func RenderSwitchSuccess(name, baseURL, model, backup string) string {
 // RenderOfficialSuccess formats official mode result.
 func RenderOfficialSuccess(backup string) string {
 	body := joinFields(
-		theme.Success.Render(theme.SymOK)+"  已切回 Grok 官方认证配置",
+		theme.Success.Render(theme.SymOK)+"  已切换到 Grok 官方配置（默认）",
 		"",
 		theme.Field("备份", backup),
 	)
 	return box(body, "success") + "\n"
 }
 
-// RenderShow formats profile details.
+// RenderShow formats provider details.
 func RenderShow(p profiles.Profile, showKey bool) string {
 	key := secret.MaskSecret(p.APIKey)
 	if showKey {
@@ -153,6 +173,32 @@ func RenderShow(p profiles.Profile, showKey bool) string {
 		theme.Field("状态", active),
 	)
 	return box(body, "normal") + "\n"
+}
+
+// RenderTestResult formats a probe result.
+func RenderTestResult(name string, r probe.Result) string {
+	var body string
+	if r.OK {
+		body = joinFields(
+			theme.Success.Render(theme.SymOK)+"  连通性测试通过",
+			"",
+			theme.Field("供应商", name),
+			theme.Field("端点", r.Endpoint),
+			theme.Field("结果", r.Message),
+			theme.Field("耗时", fmt.Sprintf("%d ms", r.Latency.Milliseconds())),
+		)
+		return box(body, "success") + "\n"
+	}
+	body = joinFields(
+		theme.Error.Render(theme.SymFail)+"  连通性测试失败",
+		"",
+		theme.Field("供应商", name),
+		theme.Field("端点", r.Endpoint),
+		theme.Field("HTTP", fmt.Sprintf("%d", r.StatusCode)),
+		theme.Field("原因", r.Message),
+		theme.Field("耗时", fmt.Sprintf("%d ms", r.Latency.Milliseconds())),
+	)
+	return box(body, "error") + "\n"
 }
 
 // RenderBackups formats backup list.
@@ -217,7 +263,6 @@ func RenderBackupsWithSize(rows [][]string, backupsDir string, keep int) string 
 
 func box(content, kind string) string {
 	if !IsTTY() || !theme.Enabled() {
-		// plain indent
 		lines := strings.Split(content, "\n")
 		for i, l := range lines {
 			lines[i] = "  " + l
@@ -245,7 +290,6 @@ func joinFields(lines ...string) string {
 }
 
 func indent(s, prefix string) string {
-	// lipgloss boxes already have padding; for plain mode we indent.
 	if IsTTY() && theme.Enabled() {
 		return s
 	}

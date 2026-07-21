@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/Gelmezon/grok-switch/internal/models"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
 )
@@ -44,26 +45,26 @@ func (m *StatusModel) View() string {
 
 	switch {
 	case !st.HasActive:
-		body.WriteString(theme.Muted.Render(theme.SymInactive+" 无活动 Profile") + "\n\n")
+		body.WriteString(theme.Success.Render(theme.SymActive+" 当前: "+models.OfficialName+"（默认官方配置）") + "\n\n")
 		body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
-		body.WriteString(theme.Field("当前配置", "使用 Grok 官方认证") + "\n")
-		return theme.BoxNormal.Width(m.width).Render(body.String() + "\n" + theme.Help.Render("Esc 返回"))
+		body.WriteString(theme.Field("说明", "使用 Grok 官方认证") + "\n")
+		return theme.BoxSuccess.Width(m.width).Render(body.String() + "\n" + theme.Help.Render("Esc 返回"))
 	case st.DiskMatches:
 		p := st.Profile
-		body.WriteString(theme.Success.Render(theme.SymActive+" 活动 Profile: "+p.Name) + "\n\n")
+		body.WriteString(theme.Success.Render(theme.SymActive+" 活动供应商: "+p.Name) + "\n\n")
 		body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
 		body.WriteString(theme.Field("Base URL", p.BaseURL) + "\n")
 		body.WriteString(theme.Field("默认模型", p.DefaultModel) + "\n")
 		body.WriteString(theme.Field("推理等级", p.DefaultReasoningEffort) + "\n\n")
-		body.WriteString(theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与 Profile 一致")) + "\n")
+		body.WriteString(theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与供应商一致")) + "\n")
 		return theme.BoxSuccess.Width(m.width).Render(body.String() + "\n" + theme.Help.Render("Esc 返回"))
 	default:
 		p := st.Profile
-		body.WriteString(theme.Warning.Render(theme.SymWarn+" 活动 Profile: "+p.Name+"（配置不一致）") + "\n\n")
+		body.WriteString(theme.Warning.Render(theme.SymWarn+" 活动供应商: "+p.Name+"（配置不一致）") + "\n\n")
 		body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
-		body.WriteString(theme.Field("Profile 期望", p.BaseURL) + "\n")
+		body.WriteString(theme.Field("供应商期望", p.BaseURL) + "\n")
 		body.WriteString(theme.Field("默认模型", p.DefaultModel) + "\n\n")
-		body.WriteString(theme.Field("磁盘配置", theme.Error.Render(theme.SymFail+" 与 Profile 不一致")) + "\n")
+		body.WriteString(theme.Field("磁盘配置", theme.Error.Render(theme.SymFail+" 与供应商不一致")) + "\n")
 		body.WriteString(theme.Field("建议运行", fmt.Sprintf("grok-switch use %s", p.Name)) + "\n")
 		return theme.BoxWarning.Width(m.width).Render(body.String() + "\n" + theme.Help.Render("Esc 返回"))
 	}

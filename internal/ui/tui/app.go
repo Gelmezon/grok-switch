@@ -2,9 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Gelmezon/grok-switch/internal/paths"
+	"github.com/Gelmezon/grok-switch/internal/probe"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
 	"github.com/Gelmezon/grok-switch/internal/ui"
@@ -167,13 +169,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.setToast(fmt.Sprintf("%s 处于活动状态，无法删除", p.Name))
 			return a, nil
 		}
-		body := fmt.Sprintf("确定要删除 %s 吗？此操作无法撤销。\n（config.toml 不会被修改）", p.Name)
-		return a, a.push(NewTypeConfirm("删除 Profile", body, p.Name, func() tea.Cmd {
+		body := fmt.Sprintf("确定要删除供应商 %s 吗？此操作无法撤销。\n（config.toml 不会被修改）", p.Name)
+		return a, a.push(NewTypeConfirm("删除供应商", body, p.Name, func() tea.Cmd {
 			return func() tea.Msg {
 				if err := a.store.Delete(p.ID); err != nil {
 					return ErrMsg{Err: err}
 				}
-				return DoneMsg{Payload: InfoMsg{Text: "已删除 " + p.Name}}
+				return DoneMsg{Payload: InfoMsg{Text: "已删除供应商 " + p.Name}}
 			}
 		}))
 
@@ -182,14 +184,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			return a, func() tea.Msg { return ErrMsg{Err: err} }
 		}
-		cur := "（无）"
+		cur := theme.SymActive + " 官方"
 		st, _ := switcher.ActiveStatus(a.store, a.paths.GrokConfig)
 		if st.HasActive && st.Profile != nil {
 			cur = theme.SymActive + " " + st.Profile.Name + "  " + st.Profile.DefaultModel
 		}
 		body := fmt.Sprintf("从  %s\n到  %s %s  %s\n\n备份将自动保存到 %s",
 			cur, theme.SymInactive, p.Name, p.DefaultModel, a.paths.BackupsDir)
-		return a, a.push(NewConfirm("切换 Profile", body, "确认切换", true, func() tea.Cmd {
+		return a, a.push(NewConfirm("切换供应商", body, "确认切换", true, func() tea.Cmd {
 			return func() tea.Msg {
 				res, err := switcher.Activate(p.ID, a.store, a.paths.GrokConfig, a.paths.BackupsDir)
 				if err != nil {
@@ -200,23 +202,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}))
 
 	case requestOfficialMsg:
-		body := "将移除中间站相关配置段，保留其他 TOML 段，\n并清除活动 Profile 标记。\n\n备份将自动保存。"
-		return a, a.push(NewConfirm("切回官方认证", body, "确认", true, func() tea.Cmd {
+		body := "将移除中间站相关配置段，保留其他 TOML 段，\n并恢复为 Grok 官方认证（默认配置）。\n\n备份将自动保存。"
+		return a, a.push(NewConfirm("切换到官方配置", body, "确认", true, func() tea.Cmd {
 			return func() tea.Msg {
 				bak, err := switcher.ActivateOfficial(a.store, a.paths.GrokConfig, a.paths.BackupsDir)
 				if err != nil {
 					return ErrMsg{Err: err}
 				}
-				return DoneMsg{Payload: InfoMsg{Text: "已切回官方（备份: " + bak + ")"}}
+				return DoneMsg{Payload: InfoMsg{Text: "已切换到官方配置（备份: " + bak + ")"}}
 			}
 		}))
+
+	case requestTestMsg:
+		p := msg.Profile
+		a.setToast("正在测试 " + p.Name + " …")
+		return a, func() tea.Msg {
+			r := probe.TestModel(p.BaseURL, p.APIKey, p.DefaultModel, 20*time.Second)
+			if r.OK {
+				return InfoMsg{Text: fmt.Sprintf("测试通过 %s · %s · %dms", p.Name, r.Message, r.Latency.Milliseconds())}
+			}
+			return ErrMsg{Err: fmt.Errorf("测试失败 %s: %s", p.Name, r.Message)}
+		}
 
 	case requestBackupMsg:
 		return a, a.push(NewBackupScreen(a.paths.BackupsDir, a.paths.GrokConfig, a.doRestore, a.doPrune))
 
 	case backupRestoreRequest:
 		name := msg.Name
-		body := fmt.Sprintf("恢复文件  %s\n\n%s  恢复操作将：\n   1. 先备份当前 config.toml\n   2. 用选定备份覆盖 config.toml\n   3. 清除活动 Profile 标记",
+		body := fmt.Sprintf("恢复文件  %s\n\n%s  恢复操作将：\n   1. 先备份当前 config.toml\n   2. 用选定备份覆盖 config.toml\n   3. 清除活动供应商标记（回到官方）",
 			name, theme.SymWarn)
 		return a, a.push(NewConfirm("恢复备份", body, "确认恢复", true, func() tea.Cmd {
 			return a.doRestore(name)
@@ -238,7 +251,7 @@ func (a *App) doCreate(p profiles.Profile) tea.Cmd {
 		if err != nil {
 			return ErrMsg{Err: err}
 		}
-		return DoneMsg{Payload: InfoMsg{Text: "已添加 " + created.Name}}
+		return DoneMsg{Payload: InfoMsg{Text: "已添加供应商 " + created.Name + "（高级模型可稍后编辑）"}}
 	}
 }
 
@@ -249,7 +262,7 @@ func (a *App) doUpdate(id string) func(profiles.Profile) tea.Cmd {
 			if err != nil {
 				return ErrMsg{Err: err}
 			}
-			return DoneMsg{Payload: InfoMsg{Text: "已更新 " + p.Name}}
+			return DoneMsg{Payload: InfoMsg{Text: "已更新供应商 " + p.Name}}
 		}
 	}
 }
