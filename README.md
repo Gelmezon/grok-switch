@@ -17,13 +17,13 @@
 
 ## Why I built grok-switch
 
-I originally built `grok-switch` because I needed to switch frequently between official Grok Build authentication and several relay providers on Linux servers. It looks like a simple matter of changing an API URL and a key, but the real configuration has more moving parts.
+I run Grok Build on Linux servers and use relay providers instead of the official authentication. Switching between them sounds simple—change the URL, swap the key—but it kept not working, and I kept spending time debugging TOML to find out why.
 
-Grok Build keeps a default model, a Web Search model, subagent models, and per-model authentication and routing fields. In particular, with Grok Build `0.2.106`, changing only the legacy `[endpoints].api_url` is not enough to route requests through a relay. Every `[model.'model-name']` section also needs the correct `base_url` and `api_backend`. This is why a relay can pass both `/v1/models` and `/v1/chat/completions` tests while Grok still reports `Authentication required`.
+The root cause is that Grok Build `0.2.106` needs more than a global `[endpoints].api_url`. Every model section needs its own `base_url` and `api_backend`. If those are missing or wrong, the relay's `/v1/models` and `/v1/chat/completions` both return 200, but Grok itself still says `Authentication required`. That combination is annoying to debug because everything looks fine until it isn't.
 
-Relay model inventories also change over time. Models are added, renamed, and removed. A handwritten list quickly drifts away from the server, while repeatedly editing `~/.grok/config.toml` risks overwriting unrelated settings, exposing an API key, or leaving a broken file after an interrupted write.
+Relay model lists also change over time—models get added, renamed, or dropped. I was maintaining a handwritten list and it kept drifting. Direct edits to `~/.grok/config.toml` made things worse: easy to clobber unrelated settings, easy to leave the file broken if the write gets interrupted.
 
-I turned that fragile manual process into `grok-switch`: saving a relay, discovering the models it currently provides, switching safely, and recovering when necessary should be one repeatable and inspectable operation—not another TOML debugging session.
+So I automated it. `grok-switch` stores each relay as a profile, fetches the live model list when you switch, and writes the full per-model configuration instead of having you do it by hand. It backs up before every change and rolls back if something goes wrong.
 
 ## Problems it solves
 
