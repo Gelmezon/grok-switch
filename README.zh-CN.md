@@ -15,6 +15,44 @@
 
 ---
 
+## 我为什么写 grok-switch
+
+我最初写 `grok-switch`，是因为自己需要在 Linux 服务器上频繁切换 Grok Build 的官方认证和不同中间站。表面看，这件事似乎只需要修改一个 API 地址和一个 Key；真正使用后才会发现，问题远不止于此。
+
+Grok Build 的配置同时包含默认模型、Web Search 模型、子代理模型和每个模型自己的认证与路由字段。尤其在 Grok Build `0.2.106` 中，仅修改旧的 `[endpoints].api_url` 并不足以让中间站真正生效：每个 `[model.'模型名']` 还需要正确的 `base_url` 和 `api_backend`。这也是为什么中间站的 `/v1/models` 和 `/v1/chat/completions` 明明测试正常，Grok 里却仍然可能出现 `Authentication required`。
+
+另一个现实问题是，中间站提供的模型并不是固定的。模型可能增加、改名或下线。如果继续维护一份手写模型列表，配置很快就会与服务端不一致；如果直接反复编辑 `~/.grok/config.toml`，又容易覆盖原有设置、泄露 API Key，或者在写入中断后留下无法解析的文件。
+
+因此，我把这套容易出错的手工操作做成了 `grok-switch`：让“保存一个中间站、同步它当前提供的模型、安全切换配置、出错时恢复”成为一次可重复、可检查的操作，而不是每次都重新排查 TOML。
+
+## 它解决什么问题
+
+| 实际问题 | grok-switch 的处理方式 |
+|---|---|
+| 修改了中间站地址，但 Grok 仍要求 `/login` | 为每个模型生成 Grok 当前版本需要的 `base_url`、`api_backend = "chat_completions"` 和认证字段，而不只写旧版全局端点。 |
+| 中间站模型经常变化 | 添加、编辑和切换 Profile 时自动请求 `/v1/models`，去重并生成全部模型配置；已有默认模型仍可用时会继续保留。 |
+| 多个中间站的 URL、Key 和模型容易混淆 | 每个供应商保存为独立 Profile，可以按名称查看、测试和切换。 |
+| “能访问 API”不等于“Grok 能对话” | `test` 分别检查认证、Models 端点和 Chat Completions，避免只凭一次 HTTP 成功误判。 |
+| 手工修改 TOML 容易损坏或覆盖其他设置 | 只管理与中间站有关的字段，保留未知配置；使用原子写入、写后解析校验和切换前备份。 |
+| 想临时恢复 Grok 官方认证 | `official` 会移除由本工具管理的中间站字段，同时保留其他 Grok 设置。 |
+| 服务器没有桌面环境 | 提供一个 Linux 单二进制，同时支持全屏 TUI、普通 CLI、管道和 CI。 |
+| API Key 可能出现在 history 或 `ps` | 不提供 `--api-key` 参数；支持隐藏输入、标准输入和环境变量，配置文件使用严格权限。 |
+
+## 一次切换实际做了什么
+
+当你执行 `grok-switch use relay-a` 时，工具会：
+
+1. 读取该 Profile 的 Base URL 和 API Key。
+2. 请求中间站的 `/v1/models`，同步当前真实可用的模型列表。
+3. 保留仍然有效的默认模型；否则按优先级选择一个可用模型。
+4. 为每个模型生成独立的 Grok 路由、认证和推理配置。
+5. 备份现有 `~/.grok/config.toml`，再通过原子写入更新受管字段并重新解析校验。
+6. 将 Profile 标记为当前配置；之后 Grok Build 直接请求你配置的中间站。
+
+`grok-switch` **不是中间站，也不是网络代理**。它不会转发、保存或查看 Grok 的日常对话流量；它只在本机管理配置，并在添加、编辑、切换或测试时主动访问中间站。它也不能让失效的 API Key 或不兼容的接口变得可用：当前面向的是兼容 OpenAI Chat Completions、提供 `/v1/models` 与 `/v1/chat/completions` 的服务。
+
+---
+
 ## 一键安装（推荐）
 
 在 **Linux** 上执行下面这一行即可：自动识别架构、从最新 Release 下载二进制并安装到 `/usr/local/bin`。
@@ -71,9 +109,9 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 ---
 
-## 这是什么？
+## 日常使用概览
 
-`grok-switch` 管理多个 **Grok Build 中间站 Profile**，在它们与官方认证之间安全切换 `~/.grok/config.toml`。
+日常使用时，可以通过下面这些命令管理多个 **Grok Build 中间站 Profile**，并在它们与官方认证之间安全切换 `~/.grok/config.toml`。
 
 - 无桌面 / Web / OAuth 依赖，**一个静态二进制**
 - TTY 下全屏 TUI；管道 / CI 自动纯文本

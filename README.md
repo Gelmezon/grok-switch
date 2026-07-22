@@ -15,6 +15,44 @@
 
 ---
 
+## Why I built grok-switch
+
+I originally built `grok-switch` because I needed to switch frequently between official Grok Build authentication and several relay providers on Linux servers. It looks like a simple matter of changing an API URL and a key, but the real configuration has more moving parts.
+
+Grok Build keeps a default model, a Web Search model, subagent models, and per-model authentication and routing fields. In particular, with Grok Build `0.2.106`, changing only the legacy `[endpoints].api_url` is not enough to route requests through a relay. Every `[model.'model-name']` section also needs the correct `base_url` and `api_backend`. This is why a relay can pass both `/v1/models` and `/v1/chat/completions` tests while Grok still reports `Authentication required`.
+
+Relay model inventories also change over time. Models are added, renamed, and removed. A handwritten list quickly drifts away from the server, while repeatedly editing `~/.grok/config.toml` risks overwriting unrelated settings, exposing an API key, or leaving a broken file after an interrupted write.
+
+I turned that fragile manual process into `grok-switch`: saving a relay, discovering the models it currently provides, switching safely, and recovering when necessary should be one repeatable and inspectable operation—not another TOML debugging session.
+
+## Problems it solves
+
+| Real-world problem | How grok-switch handles it |
+|---|---|
+| The relay URL was changed, but Grok still asks for `/login` | It generates the current per-model `base_url`, `api_backend = "chat_completions"`, and authentication fields instead of relying only on the legacy global endpoint. |
+| A relay's model inventory keeps changing | Adding, editing, or switching a profile fetches `/v1/models`, deduplicates the result, and generates every model entry. An existing default is preserved while available. |
+| URLs, keys, and models from multiple relays get mixed up | Each provider is stored as an independent profile that can be inspected, tested, and selected by name. |
+| “The API responds” does not mean “Grok can chat” | `test` checks authentication, the Models endpoint, and Chat Completions separately instead of treating one successful HTTP response as proof. |
+| Manual TOML edits can corrupt or overwrite other settings | It updates only relay-related fields, preserves unknown settings, writes atomically, parses the result, and creates a backup before switching. |
+| Official Grok authentication is needed again | `official` removes fields managed by grok-switch while preserving unrelated Grok settings. |
+| The server has no desktop environment | It ships as one Linux binary with a full-screen TUI, regular CLI output, pipe support, and CI-friendly operation. |
+| API keys can leak into shell history or `ps` | There is no `--api-key` argument. Hidden prompts, standard input, environment variables, and restrictive file permissions are supported. |
+
+## What happens during a switch
+
+When you run `grok-switch use relay-a`, the tool:
+
+1. Loads the profile's Base URL and API key.
+2. Requests `/v1/models` from the relay to synchronize the real model inventory.
+3. Preserves the current default if it is still available; otherwise it selects an available model by preference.
+4. Generates independent Grok routing, authentication, and reasoning settings for every model.
+5. Backs up `~/.grok/config.toml`, atomically updates the managed fields, and parses the result again for verification.
+6. Marks the profile as active. Grok Build then talks directly to the configured relay.
+
+`grok-switch` is **not a relay or network proxy**. It does not forward, store, or inspect normal Grok conversation traffic. It manages local configuration and contacts a relay only when a profile is added, edited, selected, or tested. It also cannot make an expired key or an incompatible API work: it currently targets OpenAI Chat Completions-compatible services that expose `/v1/models` and `/v1/chat/completions`.
+
+---
+
 ## One-line installation (recommended)
 
 Run the following command on **Linux**. It detects the system architecture, downloads the latest release, and installs the binary to `/usr/local/bin`.
@@ -71,9 +109,9 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 ---
 
-## What is it?
+## Everyday usage
 
-`grok-switch` manages multiple **Grok Build relay profiles** and safely switches `~/.grok/config.toml` between those profiles and the official authentication configuration.
+For day-to-day use, the following commands manage multiple **Grok Build relay profiles** and safely switch `~/.grok/config.toml` between those profiles and the official authentication configuration.
 
 - **One static binary** with no desktop, web, or OAuth dependencies
 - Full-screen TUI in a terminal; automatic plain-text output in pipes and CI
