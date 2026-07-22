@@ -115,7 +115,7 @@ grok-switch tui
 | `?` | 帮助 |
 | `q` | 退出 |
 
-**注意**：添加/编辑供应商现在使用**单步界面**（供应商名称 + Base URL + API Key）。**模型配置已移除** TUI 中，请在官方 Grok 界面自行配置模型。
+**注意**：添加、编辑或切换供应商时，grok-switch 会使用 API Key 请求中间站的 `/v1/models`，自动生成全部模型配置并选择默认模型。当前默认模型仍可用时会保持不变。
 
 ### CLI 常用命令
 
@@ -125,8 +125,7 @@ grok-switch add relay-a
 
 # 非交互添加（CI）
 GROK_SWITCH_API_KEY='sk-xxx' grok-switch add relay-a \
-  --base-url https://relay.example.com/v1 \
-  --model grok-4
+  --base-url https://relay.example.com/v1
 
 # 切换 / 状态 / 官方
 grok-switch use relay-a

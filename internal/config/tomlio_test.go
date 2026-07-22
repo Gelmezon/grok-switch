@@ -38,6 +38,17 @@ func TestApplyEmpty(t *testing.T) {
 	if !strings.Contains(string(raw), "api_url") {
 		t.Fatalf("missing api_url: %s", raw)
 	}
+	data, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := modelSection(data, p.DefaultModel)
+	if got := asString(model["base_url"]); got != p.BaseURL {
+		t.Fatalf("base_url = %q, want %q", got, p.BaseURL)
+	}
+	if got := asString(model["api_backend"]); got != "chat_completions" {
+		t.Fatalf("api_backend = %q, want chat_completions", got)
+	}
 	if !strings.Contains(string(raw), "sk-xxx") {
 		t.Fatalf("missing key: %s", raw)
 	}
@@ -48,6 +59,112 @@ func TestApplyEmpty(t *testing.T) {
 	// Re-parse.
 	if _, err := Load(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestApplyWritesEveryDiscoveredModel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	p := sampleProfile()
+	if err := profiles.ApplyDiscoveredModels(&p, []string{"grok-4.5-latest", "grok-4.5", "grok-code-fast"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(path, p); err != nil {
+		t.Fatal(err)
+	}
+	data, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, ok := data["model"].(map[string]interface{})
+	if !ok || len(models) != 3 {
+		t.Fatalf("model sections = %#v", data["model"])
+	}
+	for _, id := range []string{"grok-4.5-latest", "grok-4.5", "grok-code-fast"} {
+		section := modelSection(data, id)
+		if section == nil {
+			t.Fatalf("missing model section %q", id)
+		}
+		if got := asString(section["base_url"]); got != p.BaseURL {
+			t.Fatalf("%s base_url = %q, want %q", id, got, p.BaseURL)
+		}
+		if got := asString(section["api_backend"]); got != "chat_completions" {
+			t.Fatalf("%s api_backend = %q", id, got)
+		}
+		if got := asString(section["api_key"]); got != p.APIKey {
+			t.Fatalf("%s api_key not inherited", id)
+		}
+	}
+}
+
+func TestApplyAddsV1ToPerModelBaseURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	p := sampleProfile()
+	p.BaseURL = "https://relay.example.com"
+	if err := Apply(path, p); err != nil {
+		t.Fatal(err)
+	}
+	data, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := nestedString(data, "endpoints", "api_url"); got != p.BaseURL {
+		t.Fatalf("legacy api_url = %q, want %q", got, p.BaseURL)
+	}
+	if got := asString(modelSection(data, p.DefaultModel)["base_url"]); got != p.BaseURL+"/v1" {
+		t.Fatalf("model base_url = %q, want %q", got, p.BaseURL+"/v1")
+	}
+}
+
+func TestApplyUpgradesLegacyGrokSwitchConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	legacy := `[endpoints]
+api_url = "https://relay.example.com"
+
+[model."grok-4.5-latest"]
+api_key = "sk-legacy"
+model = "grok-4.5-latest"
+reasoning_effort = "high"
+reasoning_efforts = ["low", "medium", "high"]
+supports_reasoning_effort = true
+
+[models]
+default = "grok-4.5-latest"
+web_search = "grok-4.5-latest"
+
+[subagents.models]
+explore = "grok-4.5-latest"
+plan = "grok-4.5-latest"
+`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := sampleProfile()
+	p.BaseURL = "https://relay.example.com"
+	p.APIKey = "sk-legacy"
+	p.DefaultModel = "grok-4.5-latest"
+	p.WebSearchModel = p.DefaultModel
+	p.SubagentsModels.Explore = p.DefaultModel
+	p.SubagentsModels.Plan = p.DefaultModel
+	if err := Apply(path, p); err != nil {
+		t.Fatal(err)
+	}
+	data, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := modelSection(data, p.DefaultModel)
+	if got := asString(model["base_url"]); got != "https://relay.example.com/v1" {
+		t.Fatalf("upgraded base_url = %q", got)
+	}
+	if got := asString(model["api_backend"]); got != "chat_completions" {
+		t.Fatalf("upgraded api_backend = %q", got)
+	}
+	ok, err := Match(path, p)
+	if err != nil || !ok {
+		t.Fatalf("upgraded config should match: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -155,6 +272,12 @@ func TestMatchChecksEveryManagedField(t *testing.T) {
 		{"reasoning effort", func(d map[string]interface{}) {
 			d["model"].(map[string]interface{})[p.DefaultModel].(map[string]interface{})["reasoning_effort"] = "low"
 		}},
+		{"model base url", func(d map[string]interface{}) {
+			d["model"].(map[string]interface{})[p.DefaultModel].(map[string]interface{})["base_url"] = "https://wrong.example.com/v1"
+		}},
+		{"model api backend", func(d map[string]interface{}) {
+			d["model"].(map[string]interface{})[p.DefaultModel].(map[string]interface{})["api_backend"] = "responses"
+		}},
 		{"extra model name", func(d map[string]interface{}) {
 			d["model"].(map[string]interface{})["grok-extra"].(map[string]interface{})["model"] = "wrong"
 		}},
@@ -215,6 +338,8 @@ future_subagent = true
 
 [model.old]
 model = "old"
+base_url = "https://old.example.com/v1"
+api_backend = "chat_completions"
 api_key = "old-key"
 supports_reasoning_effort = false
 reasoning_effort = "low"
@@ -282,6 +407,8 @@ future_subagent = true
 
 [model.grok-4]
 model = "grok-4"
+base_url = "https://relay.example.com/v1"
+api_backend = "chat_completions"
 api_key = "sk-key"
 supports_reasoning_effort = true
 reasoning_effort = "high"
@@ -445,5 +572,93 @@ func TestImportFromConfig(t *testing.T) {
 	}
 	if imp.BaseURL != p.BaseURL || imp.DefaultModel != p.DefaultModel || imp.APIKey != p.APIKey {
 		t.Fatalf("import mismatch: %+v", imp)
+	}
+}
+
+func TestMatchRejectsLegacyConfigWithoutPerModelRouting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	p := sampleProfile()
+	legacy := `[endpoints]
+api_url = "https://relay.example.com/v1"
+
+[models]
+default = "grok-4"
+web_search = "grok-4"
+
+[subagents.models]
+explore = "grok-4"
+plan = "grok-4"
+
+[model.grok-4]
+model = "grok-4"
+api_key = "sk-xxx"
+supports_reasoning_effort = true
+reasoning_effort = "high"
+reasoning_efforts = ["low", "medium", "high"]
+`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := Match(path, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("legacy config without base_url/api_backend must require resync")
+	}
+}
+
+func TestImportFromCurrentGrokConfigWithoutLegacyEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `[models]
+default = "grok-4.5-latest"
+web_search = "grok-4.5-latest"
+
+[model."grok-4.5-latest"]
+model = "grok-4.5-latest"
+base_url = "https://relay.example.com/v1"
+api_backend = "chat_completions"
+api_key = "sk-current"
+
+[subagents.models]
+explore = "grok-4.5-latest"
+plan = "grok-4.5-latest"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	imp, err := ImportFromConfig(path, "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imp.BaseURL != "https://relay.example.com/v1" || imp.UpstreamFormat != "openai_chat" || imp.APIKey != "sk-current" {
+		t.Fatalf("import mismatch: %+v", imp)
+	}
+}
+
+func TestImportFromLegacyConfigFallsBackToGlobalEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `[endpoints]
+api_url = "https://legacy.example.com"
+
+[models]
+default = "grok-4"
+
+[model.grok-4]
+model = "grok-4"
+api_key = "sk-legacy"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	imp, err := ImportFromConfig(path, "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imp.BaseURL != "https://legacy.example.com" || imp.UpstreamFormat != "openai_chat" || imp.APIKey != "sk-legacy" {
+		t.Fatalf("legacy import mismatch: %+v", imp)
 	}
 }

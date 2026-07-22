@@ -44,6 +44,16 @@ func setup() (*appContext, error) {
 	}, nil
 }
 
+func discoverProfileModels(p profiles.Profile) (profiles.Profile, error) {
+	var discovered profiles.Profile
+	err := ui.WithSpinner("正在从中间站拉取模型列表...", func() error {
+		var err error
+		discovered, err = probe.DiscoverProfileModels(p, 20*time.Second)
+		return err
+	})
+	return discovered, err
+}
+
 func resolveProfile(store profiles.ProfileStore, nameOrID string) (profiles.Profile, error) {
 	nameOrID = strings.TrimSpace(nameOrID)
 	if nameOrID == "" {
@@ -227,6 +237,13 @@ func runUse(args []string) error {
 			return nil
 		}
 	}
+	p, err = discoverProfileModels(p)
+	if err != nil {
+		return err
+	}
+	if _, err := ctx.Store.Update(p.ID, p); err != nil {
+		return fmt.Errorf("保存模型列表失败: %w", err)
+	}
 
 	var res switcher.ActivateResult
 	err = ui.WithSpinner("正在切换配置...", func() error {
@@ -303,7 +320,7 @@ func runAdd(args []string) error {
 	var p profiles.Profile
 	if nonInteractive {
 		if name == "" {
-			return &exitcodes.UsageError{Msg: "非交互模式需要名称: grok-switch add <name> --base-url ... --model ..."}
+			return &exitcodes.UsageError{Msg: "非交互模式需要名称: grok-switch add <name> --base-url ..."}
 		}
 		p.Name = name
 		p.BaseURL = *baseURL
@@ -319,8 +336,8 @@ func runAdd(args []string) error {
 			return err
 		}
 		p.APIKey = key
-		if p.BaseURL == "" || p.DefaultModel == "" {
-			return &exitcodes.UsageError{Msg: "非交互模式需要 --base-url 和 --model"}
+		if p.BaseURL == "" {
+			return &exitcodes.UsageError{Msg: "非交互模式需要 --base-url"}
 		}
 	} else {
 		// Prefer bubbletea wizard when TTY available
@@ -331,6 +348,10 @@ func runAdd(args []string) error {
 		return runAddPrompts(ctx, name)
 	}
 
+	p, err = discoverProfileModels(p)
+	if err != nil {
+		return err
+	}
 	created, err := ctx.Store.Create(p)
 	if err != nil {
 		return err
@@ -343,7 +364,11 @@ func runAddWizard(ctx *appContext, prefill string) error {
 	done := make(chan error, 1)
 	wiz := tui.NewWizard("add", profiles.Profile{Name: prefill}, func(p profiles.Profile) tea.Cmd {
 		return func() tea.Msg {
-			_, err := ctx.Store.Create(p)
+			p, err := probe.DiscoverProfileModels(p, 20*time.Second)
+			if err != nil {
+				return tui.ErrMsg{Err: err}
+			}
+			_, err = ctx.Store.Create(p)
 			if err != nil {
 				return tui.ErrMsg{Err: err}
 			}
@@ -373,21 +398,9 @@ func runAddPrompts(ctx *appContext, name string) error {
 	if err != nil {
 		return err
 	}
-	p.DefaultModel, err = promptLine(in, "Default model: ", false)
+	p, err = discoverProfileModels(p)
 	if err != nil {
 		return err
-	}
-	ws, _ := promptLine(in, "Web search model [同默认]: ", true)
-	if ws != "" {
-		p.WebSearchModel = ws
-	}
-	ex, _ := promptLine(in, "Explore model [同默认]: ", true)
-	if ex != "" {
-		p.SubagentsModels.Explore = ex
-	}
-	pl, _ := promptLine(in, "Plan model [同默认]: ", true)
-	if pl != "" {
-		p.SubagentsModels.Plan = pl
 	}
 	created, err := ctx.Store.Create(p)
 	if err != nil {
@@ -454,6 +467,10 @@ func runEdit(args []string) error {
 			p.DefaultModel = v
 		}
 	}
+	p, err = discoverProfileModels(p)
+	if err != nil {
+		return err
+	}
 	updated, err := ctx.Store.Update(cur.ID, p)
 	if err != nil {
 		return err
@@ -466,7 +483,11 @@ func runEditWizard(ctx *appContext, cur profiles.Profile) error {
 	done := make(chan error, 1)
 	wiz := tui.NewWizard("edit", cur, func(p profiles.Profile) tea.Cmd {
 		return func() tea.Msg {
-			_, err := ctx.Store.Update(cur.ID, p)
+			p, err := probe.DiscoverProfileModels(p, 20*time.Second)
+			if err != nil {
+				return tui.ErrMsg{Err: err}
+			}
+			_, err = ctx.Store.Update(cur.ID, p)
 			if err != nil {
 				return tui.ErrMsg{Err: err}
 			}

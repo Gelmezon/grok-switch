@@ -177,8 +177,20 @@ func ImportFromConfig(configPath, name string) (profiles.Profile, error) {
 	if err != nil {
 		return profiles.Profile{}, err
 	}
-	baseURL := nestedString(data, "endpoints", "api_url")
 	defModel := nestedString(data, "models", "default")
+	model := modelSection(data, defModel)
+	baseURL := ""
+	backend := ""
+	if model != nil {
+		baseURL = asString(model["base_url"])
+		backend = asString(model["api_backend"])
+	}
+	// Grok Build 0.2.106 resolves routing per model. Fall back to the legacy
+	// global endpoint so profiles created by older grok-switch releases remain
+	// importable.
+	if baseURL == "" {
+		baseURL = nestedString(data, "endpoints", "api_url")
+	}
 	webSearch := nestedString(data, "models", "web_search")
 	explore := nestedString(data, "subagents", "models", "explore")
 	plan := nestedString(data, "subagents", "models", "plan")
@@ -193,6 +205,7 @@ func ImportFromConfig(configPath, name string) (profiles.Profile, error) {
 
 	p := profiles.Profile{
 		Name:                   name,
+		UpstreamFormat:         upstreamFormatForBackend(backend),
 		BaseURL:                baseURL,
 		APIKey:                 apiKey,
 		DefaultModel:           defModel,
@@ -265,7 +278,7 @@ func desiredManagedValues(p profiles.Profile) []managedValue {
 	sections := desiredModelSections(p)
 	for _, id := range sortedModelIDs(sections) {
 		section := sections[id]
-		for _, key := range []string{"model", "api_key", "supports_reasoning_effort", "reasoning_effort", "reasoning_efforts"} {
+		for _, key := range []string{"model", "base_url", "api_backend", "api_key", "supports_reasoning_effort", "reasoning_effort", "reasoning_efforts"} {
 			values = append(values, managedValue{path: []string{"model", id, key}, value: section[key]})
 		}
 	}
@@ -274,9 +287,13 @@ func desiredManagedValues(p profiles.Profile) []managedValue {
 
 func desiredModelSections(p profiles.Profile) map[string]map[string]interface{} {
 	effort := nonEmpty(p.DefaultReasoningEffort, "high")
+	baseURL := grokModelBaseURL(p.BaseURL)
+	backend := apiBackendForUpstreamFormat(p.UpstreamFormat)
 	sections := map[string]map[string]interface{}{
 		p.DefaultModel: {
 			"model":                     p.DefaultModel,
+			"base_url":                  baseURL,
+			"api_backend":               backend,
 			"api_key":                   p.APIKey,
 			"supports_reasoning_effort": true,
 			"reasoning_effort":          effort,
@@ -296,6 +313,8 @@ func desiredModelSections(p profiles.Profile) map[string]map[string]interface{} 
 		}
 		sections[id] = map[string]interface{}{
 			"model":                     nonEmpty(m.Model, id),
+			"base_url":                  baseURL,
+			"api_backend":               backend,
 			"api_key":                   key,
 			"supports_reasoning_effort": m.SupportsReasoningEffort,
 			"reasoning_effort":          reasoningEffort,
@@ -306,6 +325,8 @@ func desiredModelSections(p profiles.Profile) map[string]map[string]interface{} 
 		if _, ok := sections[id]; !ok {
 			sections[id] = map[string]interface{}{
 				"model":                     id,
+				"base_url":                  baseURL,
+				"api_backend":               backend,
 				"api_key":                   p.APIKey,
 				"supports_reasoning_effort": true,
 				"reasoning_effort":          effort,
@@ -331,7 +352,7 @@ func managedModelEqual(got, want map[string]interface{}) bool {
 			return false
 		}
 	}
-	for _, key := range []string{"model", "api_key", "reasoning_effort"} {
+	for _, key := range []string{"model", "base_url", "api_backend", "api_key", "reasoning_effort"} {
 		if asString(got[key]) != asString(want[key]) {
 			return false
 		}
@@ -340,6 +361,35 @@ func managedModelEqual(got, want map[string]interface{}) bool {
 		return false
 	}
 	return equalStringSlice(asStringSlice(got["reasoning_efforts"]), asStringSlice(want["reasoning_efforts"]))
+}
+
+// grokModelBaseURL returns the OpenAI-compatible API prefix consumed by
+// Grok Build's per-model base_url. Profiles historically accepted either a
+// host root or a full /v1 prefix, while Grok Build expects the latter.
+func grokModelBaseURL(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" || strings.HasSuffix(baseURL, "/v1") || strings.Contains(baseURL, "/v1/") {
+		return baseURL
+	}
+	return baseURL + "/v1"
+}
+
+func apiBackendForUpstreamFormat(format string) string {
+	switch strings.TrimSpace(format) {
+	case "", "openai_chat", "chat_completions":
+		return "chat_completions"
+	default:
+		return strings.TrimSpace(format)
+	}
+}
+
+func upstreamFormatForBackend(backend string) string {
+	switch strings.TrimSpace(backend) {
+	case "", "chat_completions":
+		return "openai_chat"
+	default:
+		return strings.TrimSpace(backend)
+	}
 }
 
 func nestedExists(data map[string]interface{}, keys ...string) bool {

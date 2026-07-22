@@ -47,6 +47,56 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
+func TestApplyDiscoveredModels(t *testing.T) {
+	p := sample("relay")
+	p.DefaultModel = "missing"
+	p.WebSearchModel = "missing-search"
+	p.SubagentsModels = SubagentsModels{Explore: "missing-explore", Plan: "missing-plan"}
+	p.Models = []ModelDef{{
+		ID:                      "grok-4.5",
+		Model:                   "upstream-grok-4.5",
+		APIKey:                  "model-key",
+		SupportsReasoningEffort: false,
+	}}
+	if err := ApplyDiscoveredModels(&p, []string{"z-model", "grok-4.5", "grok-4.5-latest", "grok-4.5", " "}); err != nil {
+		t.Fatal(err)
+	}
+	if p.DefaultModel != "grok-4.5-latest" {
+		t.Fatalf("default model = %q", p.DefaultModel)
+	}
+	wantIDs := []string{"grok-4.5", "grok-4.5-latest", "z-model"}
+	if strings.Join(p.AvailableModels, ",") != strings.Join(wantIDs, ",") {
+		t.Fatalf("available models = %v", p.AvailableModels)
+	}
+	if len(p.Models) != len(wantIDs) {
+		t.Fatalf("model definitions = %d", len(p.Models))
+	}
+	if p.Models[0].Model != "upstream-grok-4.5" || p.Models[0].APIKey != "model-key" || p.Models[0].SupportsReasoningEffort {
+		t.Fatalf("existing model overrides not preserved: %+v", p.Models[0])
+	}
+	if p.WebSearchModel != p.DefaultModel || p.SubagentsModels.Explore != p.DefaultModel || p.SubagentsModels.Plan != p.DefaultModel {
+		t.Fatalf("dependent models not reset to default: %+v", p)
+	}
+}
+
+func TestApplyDiscoveredModelsPreservesAvailableDefault(t *testing.T) {
+	p := sample("relay")
+	p.DefaultModel = "custom-default"
+	if err := ApplyDiscoveredModels(&p, []string{"other", "custom-default"}); err != nil {
+		t.Fatal(err)
+	}
+	if p.DefaultModel != "custom-default" {
+		t.Fatalf("default model = %q", p.DefaultModel)
+	}
+}
+
+func TestApplyDiscoveredModelsRejectsEmptyList(t *testing.T) {
+	p := sample("relay")
+	if err := ApplyDiscoveredModels(&p, []string{"", "  "}); err == nil {
+		t.Fatal("expected empty model list error")
+	}
+}
+
 func TestValidate(t *testing.T) {
 	if err := Validate(sample("ok")); err != nil {
 		t.Fatal(err)

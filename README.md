@@ -115,7 +115,7 @@ grok-switch tui
 | `?` | Show help |
 | `q` | Quit |
 
-**Note**: Profile add/edit now uses a **single-step** screen (Name + Base URL + API Key). Model configuration is **removed** from TUI — configure models yourself in the official Grok interface.
+**Note**: When adding, editing, or switching a profile, grok-switch requests the relay's `/v1/models` endpoint, generates configuration for every returned model, and selects a default automatically. An existing default is preserved while it remains available.
 
 ### Common CLI commands
 
@@ -125,8 +125,7 @@ grok-switch add relay-a
 
 # Non-interactive add (CI)
 GROK_SWITCH_API_KEY='sk-xxx' grok-switch add relay-a \
-  --base-url https://relay.example.com/v1 \
-  --model grok-4
+  --base-url https://relay.example.com/v1
 
 # Switch / status / official configuration
 grok-switch use relay-a

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -52,6 +53,120 @@ func TestProfile(p profiles.Profile, timeout time.Duration) Result {
 		}
 	}
 	return TestModel(p.BaseURL, p.APIKey, p.DefaultModel, timeout)
+}
+
+// DiscoverProfileModels fetches the relay's model inventory and applies it to
+// a profile so config generation can emit one model section per available ID.
+func DiscoverProfileModels(p profiles.Profile, timeout time.Duration) (profiles.Profile, error) {
+	ids, err := FetchModels(p.BaseURL, p.APIKey, timeout)
+	if err != nil {
+		return p, fmt.Errorf("拉取模型列表失败: %w", err)
+	}
+	if err := profiles.ApplyDiscoveredModels(&p, ids); err != nil {
+		return p, err
+	}
+	return p, nil
+}
+
+// FetchModels returns normalized model IDs from an OpenAI-compatible /models
+// endpoint. It accepts the standard {"data":[{"id":"..."}]} response and
+// common relay variants using "models" or a top-level array.
+func FetchModels(baseURL, apiKey string, timeout time.Duration) ([]string, error) {
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	apiKey = strings.TrimSpace(apiKey)
+	if baseURL == "" || apiKey == "" {
+		return nil, fmt.Errorf("Base URL 与 API Key 均不能为空")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	endpoint := modelsURL(baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("构造请求失败: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求 %s 失败: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, fmt.Errorf("读取 models 响应失败: %w", err)
+	}
+	if !isHTTPSuccess(resp.StatusCode) {
+		if isAuthenticationFailure(resp.StatusCode) {
+			return nil, fmt.Errorf("认证失败（HTTP %d）", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("Models 端点 HTTP %d: %s", resp.StatusCode, shortBody(body))
+	}
+
+	ids, err := parseModelIDs(body)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("Models 端点未返回可用模型")
+	}
+	return ids, nil
+}
+
+func parseModelIDs(body []byte) ([]string, error) {
+	var entries []json.RawMessage
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("Models 端点返回空响应")
+	}
+	if trimmed[0] == '[' {
+		if err := json.Unmarshal(trimmed, &entries); err != nil {
+			return nil, fmt.Errorf("Models 响应不是有效 JSON: %w", err)
+		}
+	} else {
+		var envelope struct {
+			Data   []json.RawMessage `json:"data"`
+			Models []json.RawMessage `json:"models"`
+		}
+		if err := json.Unmarshal(trimmed, &envelope); err != nil {
+			return nil, fmt.Errorf("Models 响应不是有效 JSON: %w", err)
+		}
+		entries = envelope.Data
+		if len(entries) == 0 {
+			entries = envelope.Models
+		}
+	}
+
+	seen := make(map[string]bool, len(entries))
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		id := ""
+		var direct string
+		if err := json.Unmarshal(entry, &direct); err == nil {
+			id = direct
+		} else {
+			var item map[string]interface{}
+			if err := json.Unmarshal(entry, &item); err != nil {
+				continue
+			}
+			for _, key := range []string{"id", "model", "name"} {
+				if value, ok := item[key].(string); ok && strings.TrimSpace(value) != "" {
+					id = value
+					break
+				}
+			}
+		}
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // TestModel tests both /models and /chat/completions within one timeout. A

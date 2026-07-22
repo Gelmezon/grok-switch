@@ -100,3 +100,61 @@ func TestUnsupportedProtocolFailsExplicitly(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", r)
 	}
 }
+
+func TestFetchModelsStandardResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer sk-test" {
+			t.Fatalf("authorization header missing")
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"z-model"},{"id":"grok-4.5-latest"},{"id":"z-model"}]}`))
+	}))
+	defer srv.Close()
+
+	ids, err := FetchModels(srv.URL, "sk-test", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"grok-4.5-latest", "z-model"}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("models = %v", ids)
+	}
+}
+
+func TestFetchModelsRelayVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"models envelope", `{"models":[{"model":"model-b"},{"name":"model-a"}]}`, "model-a,model-b"},
+		{"top-level array", `["model-b",{"id":"model-a"}]`, "model-a,model-b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+			ids, err := FetchModels(srv.URL+"/v1", "sk-test", time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(ids, ",") != tt.want {
+				t.Fatalf("models = %v", ids)
+			}
+		})
+	}
+}
+
+func TestFetchModelsRejectsAuthenticationFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	if _, err := FetchModels(srv.URL, "bad-key", time.Second); err == nil || !strings.Contains(err.Error(), "认证失败") {
+		t.Fatalf("error = %v", err)
+	}
+}

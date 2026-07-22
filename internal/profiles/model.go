@@ -3,8 +3,11 @@ package profiles
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
+
+	catalog "github.com/Gelmezon/grok-switch/internal/models"
 )
 
 // Profile represents a Grok Build mid-station profile.
@@ -33,12 +36,12 @@ type SubagentsModels struct {
 
 // ModelDef is an optional per-model definition stored with a profile.
 type ModelDef struct {
-	ID                       string   `json:"id"`
-	Model                    string   `json:"model"`
-	APIKey                   string   `json:"api_key,omitempty"`
-	SupportsReasoningEffort  bool     `json:"supports_reasoning_effort"`
-	ReasoningEffort          string   `json:"reasoning_effort,omitempty"`
-	ReasoningEfforts         []string `json:"reasoning_efforts,omitempty"`
+	ID                      string   `json:"id"`
+	Model                   string   `json:"model"`
+	APIKey                  string   `json:"api_key,omitempty"`
+	SupportsReasoningEffort bool     `json:"supports_reasoning_effort"`
+	ReasoningEffort         string   `json:"reasoning_effort,omitempty"`
+	ReasoningEfforts        []string `json:"reasoning_efforts,omitempty"`
 }
 
 // Normalize fills defaults and trims BaseURL trailing slashes.
@@ -90,6 +93,88 @@ func Validate(p Profile) error {
 		return fmt.Errorf("DefaultModel 不能为空")
 	}
 	return nil
+}
+
+// ApplyDiscoveredModels replaces the profile's model inventory with IDs
+// returned by the relay's /models endpoint. Existing per-model overrides are
+// preserved for IDs that remain available.
+func ApplyDiscoveredModels(p *Profile, discovered []string) error {
+	seen := make(map[string]bool, len(discovered))
+	ids := make([]string, 0, len(discovered))
+	for _, id := range discovered {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("中间站 /models 未返回可用模型")
+	}
+	sort.Strings(ids)
+
+	defaultModel := strings.TrimSpace(p.DefaultModel)
+	if !seen[defaultModel] {
+		defaultModel = ""
+		for _, preferred := range []string{"grok-4.5-latest", "grok-4.5", catalog.DefaultModel} {
+			if seen[preferred] {
+				defaultModel = preferred
+				break
+			}
+		}
+		if defaultModel == "" {
+			defaultModel = ids[0]
+		}
+	}
+
+	existing := make(map[string]ModelDef, len(p.Models))
+	for _, model := range p.Models {
+		id := strings.TrimSpace(nonEmptyModelID(model))
+		if id != "" {
+			existing[id] = model
+		}
+	}
+	models := make([]ModelDef, 0, len(ids))
+	for _, id := range ids {
+		model, ok := existing[id]
+		if !ok {
+			model = ModelDef{
+				ID:                      id,
+				Model:                   id,
+				SupportsReasoningEffort: true,
+				ReasoningEffort:         "high",
+				ReasoningEfforts:        []string{"low", "medium", "high"},
+			}
+		}
+		model.ID = id
+		if strings.TrimSpace(model.Model) == "" {
+			model.Model = id
+		}
+		models = append(models, model)
+	}
+
+	p.AvailableModels = ids
+	p.Models = models
+	p.DefaultModel = defaultModel
+	if !seen[p.WebSearchModel] {
+		p.WebSearchModel = defaultModel
+	}
+	if !seen[p.SubagentsModels.Explore] {
+		p.SubagentsModels.Explore = defaultModel
+	}
+	if !seen[p.SubagentsModels.Plan] {
+		p.SubagentsModels.Plan = defaultModel
+	}
+	Normalize(p)
+	return nil
+}
+
+func nonEmptyModelID(model ModelDef) string {
+	if strings.TrimSpace(model.ID) != "" {
+		return model.ID
+	}
+	return model.Model
 }
 
 // Public returns a copy safe for JSON list output (no API key).

@@ -244,10 +244,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if st.Mode == switcher.StatusUnmanagedOrUnknown {
 			cur = theme.SymWarn + " 未托管或未知配置"
 		}
-		body := fmt.Sprintf("从  %s\n到  %s %s  %s\n\n备份将自动保存到 %s",
+		body := fmt.Sprintf("从  %s\n到  %s %s  %s\n\n切换时将自动同步中间站 /models。\n备份将自动保存到 %s",
 			cur, theme.SymInactive, p.Name, p.DefaultModel, a.paths.BackupsDir)
 		return a, a.push(NewConfirm("切换供应商", body, "确认切换", true, func() tea.Cmd {
 			return func() tea.Msg {
+				p, err := probe.DiscoverProfileModels(p, 20*time.Second)
+				if err != nil {
+					return ErrMsg{Err: err}
+				}
+				if _, err := a.store.Update(p.ID, p); err != nil {
+					return ErrMsg{Err: fmt.Errorf("保存模型列表失败: %w", err)}
+				}
 				res, err := switcher.Activate(p.ID, a.store, a.paths.GrokConfig, a.paths.BackupsDir)
 				if err != nil {
 					return ErrMsg{Err: err}
@@ -383,6 +390,10 @@ func (a *App) installUpdateCmd(info updater.Info) tea.Cmd {
 
 func (a *App) doCreate(p profiles.Profile) tea.Cmd {
 	return func() tea.Msg {
+		p, err := probe.DiscoverProfileModels(p, 20*time.Second)
+		if err != nil {
+			return ErrMsg{Err: err}
+		}
 		created, err := a.store.Create(p)
 		if err != nil {
 			return ErrMsg{Err: err}
@@ -401,7 +412,11 @@ func (a *App) doCreate(p profiles.Profile) tea.Cmd {
 func (a *App) doUpdate(id string) func(profiles.Profile) tea.Cmd {
 	return func(p profiles.Profile) tea.Cmd {
 		return func() tea.Msg {
-			_, err := a.store.Update(id, p)
+			p, err := probe.DiscoverProfileModels(p, 20*time.Second)
+			if err != nil {
+				return ErrMsg{Err: err}
+			}
+			_, err = a.store.Update(id, p)
 			if err != nil {
 				return ErrMsg{Err: err}
 			}

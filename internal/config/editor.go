@@ -47,6 +47,8 @@ type sourcePatch struct {
 
 var managedModelKeys = map[string]bool{
 	"model":                     true,
+	"base_url":                  true,
+	"api_backend":               true,
 	"api_key":                   true,
 	"supports_reasoning_effort": true,
 	"reasoning_effort":          true,

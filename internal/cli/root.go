@@ -131,15 +131,15 @@ func printHelp(w io.Writer) {
   %s <命令> [参数]
 
 供应商管理:
-  add [name]              添加中间站供应商（交互向导）
-  edit <name-or-id>       编辑供应商（含高级模型）
+  add [name]              添加中间站并自动拉取模型
+  edit <name-or-id>       编辑供应商并刷新模型
   delete <name-or-id>     删除供应商
   show <name-or-id>       显示供应商详情
   list                    列出供应商（含默认官方）
   test <name-or-id>       测试模型连通性
 
 切换:
-  use <name-or-id>        切换到指定供应商
+  use <name-or-id>        刷新模型并切换到指定供应商
   status                  查看当前配置状态
   official                切回 Grok 官方配置（默认）
   import-current <name>   从当前 config.toml 导入供应商
