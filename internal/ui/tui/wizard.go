@@ -2,13 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Gelmezon/grok-switch/internal/models"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
-	"net/url"
 
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
 )
@@ -149,6 +150,11 @@ func (m *WizardModel) build() profiles.Profile {
 	p.Name = strings.TrimSpace(m.inputs[0].Value())
 	p.BaseURL = strings.TrimSpace(m.inputs[1].Value())
 	p.APIKey = strings.TrimSpace(m.inputs[2].Value())
+	// The single-step form intentionally hides model settings. New profiles
+	// still need a model to pass store validation and produce a usable config.
+	if strings.TrimSpace(p.DefaultModel) == "" {
+		p.DefaultModel = models.DefaultModel
+	}
 	profiles.Normalize(&p)
 	return p
 }

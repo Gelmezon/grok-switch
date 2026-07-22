@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/Gelmezon/grok-switch/internal/models"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestWizardValidateURL(t *testing.T) {
@@ -59,3 +61,22 @@ func TestWizardAddSingleStep(t *testing.T) {
 	}
 }
 
+func TestWizardAddBuildCanBeSaved(t *testing.T) {
+	m := NewWizard("add", profiles.Profile{}, func(p profiles.Profile) tea.Cmd { return nil })
+	m.inputs[0].SetValue("relay-a")
+	m.inputs[1].SetValue("https://relay.example.com/v1")
+	m.inputs[2].SetValue("sk-test-key")
+
+	dir := t.TempDir()
+	store := profiles.NewStore(
+		filepath.Join(dir, "profiles.json"),
+		filepath.Join(dir, "grok-switch.lock"),
+	)
+	created, err := store.Create(m.build())
+	if err != nil {
+		t.Fatalf("save wizard profile: %v", err)
+	}
+	if created.DefaultModel != models.DefaultModel {
+		t.Fatalf("default model = %q, want %q", created.DefaultModel, models.DefaultModel)
+	}
+}
