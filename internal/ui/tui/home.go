@@ -350,7 +350,6 @@ func (m *HomeModel) View() string {
 		p := sel.profile
 		right.WriteString(theme.Field("名称", p.Name) + "\n")
 		right.WriteString(theme.Field("Base URL", ui.Truncate(p.BaseURL, max(12, rightW-16))) + "\n")
-		right.WriteString(theme.Field("模型", p.DefaultModel) + "\n")
 		right.WriteString(theme.Field("推理等级", p.DefaultReasoningEffort) + "\n")
 		right.WriteString(theme.Field("搜索模型", p.WebSearchModel) + "\n")
 		right.WriteString(theme.Field("Explore", p.SubagentsModels.Explore) + "\n")

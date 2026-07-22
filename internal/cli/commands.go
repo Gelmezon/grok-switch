@@ -341,7 +341,7 @@ func runAdd(args []string) error {
 
 func runAddWizard(ctx *appContext, prefill string) error {
 	done := make(chan error, 1)
-	wiz := tui.NewAddWizard(prefill, func(p profiles.Profile) tea.Cmd {
+	wiz := tui.NewWizard("add", profiles.Profile{Name: prefill}, func(p profiles.Profile) tea.Cmd {
 		return func() tea.Msg {
 			_, err := ctx.Store.Create(p)
 			if err != nil {
@@ -464,7 +464,7 @@ func runEdit(args []string) error {
 
 func runEditWizard(ctx *appContext, cur profiles.Profile) error {
 	done := make(chan error, 1)
-	wiz := tui.NewEditWizard(cur, func(p profiles.Profile) tea.Cmd {
+	wiz := tui.NewWizard("edit", cur, func(p profiles.Profile) tea.Cmd {
 		return func() tea.Msg {
 			_, err := ctx.Store.Update(cur.ID, p)
 			if err != nil {

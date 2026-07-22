@@ -211,10 +211,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.push(NewStatusScreen(st))
 
 	case requestAddMsg:
-		return a, a.push(NewAddWizard("", a.doCreate))
+		return a, a.push(NewWizard("add", profiles.Profile{}, a.doCreate))
 
 	case requestEditMsg:
-		return a, a.push(NewEditWizard(msg.Profile, a.doUpdate(msg.Profile.ID)))
+		return a, a.push(NewWizard("edit", msg.Profile, a.doUpdate(msg.Profile.ID)))
 
 	case requestDeleteMsg:
 		p := msg.Profile
@@ -387,7 +387,7 @@ func (a *App) doCreate(p profiles.Profile) tea.Cmd {
 		if err != nil {
 			return ErrMsg{Err: err}
 		}
-		return DoneMsg{Payload: InfoMsg{Text: "已添加供应商 " + created.Name + "（高级模型可稍后编辑）"}}
+		return DoneMsg{Payload: InfoMsg{Text: "已添加供应商 " + created.Name}}
 	}
 }
 

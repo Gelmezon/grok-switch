@@ -115,6 +115,8 @@ grok-switch tui
 | `?` | Show help |
 | `q` | Quit |
 
+**Note**: Profile add/edit now uses a **single-step** screen (Name + Base URL + API Key). Model configuration is **removed** from TUI — configure models yourself in the official Grok interface.
+
 ### Common CLI commands
 
 ```bash
@@ -180,34 +182,23 @@ grok-switch update rollback
 
 ## Security
 
-- API keys never appear in command-line arguments, logs, or shell history
-- Data directories use mode `0700`, sensitive files use `0600`, and the process starts with `umask(0077)`
-- Atomic writes, pre-switch backups, and `flock`-based concurrency protection
-- Automatic `config.toml` rollback when the final profile-state commit fails
-- TOML updates preserve comments, blank lines, field ordering, and unknown fields inside managed sections
-
-`status` classifies the configuration as `official`, `managed-relay`, or `unmanaged-or-unknown`. A configuration is `managed-relay` only when every managed field matches the active profile; the absence of an active profile is not automatically treated as official mode.
-
-`test` reports `authentication_ok`, `models_endpoint_ok`, and `chat_completion_ok` separately. The overall result succeeds only when Chat Completions works, so a successful `/models` response cannot hide a missing chat endpoint. Probe support is currently limited to the `openai_chat` format.
+- API keys **never** appear in arguments, logs, or shell history (use `GROK_SWITCH_API_KEY` env var or interactive prompts).
+- Directories: `0700`; files: `0600`; process: `umask(0077)`.
+- Atomic writes + automatic backups + rollback.
+- `status` shows `official` / `managed-relay` / `unmanaged-or-unknown`.
+- `test` validates auth + Models + Chat Completions separately.
 
 ## Self-updates
 
-The TUI checks the latest stable GitHub release asynchronously at startup and caches the result for 24 hours without blocking the main screen. Press `U` to force a check at any time; when an update is available, the TUI opens a confirmation dialog and completes the installation in place.
+TUI auto-checks latest release (caches 24h). Press `U` to force check → auto-update dialog.
 
 ```bash
-grok-switch update check          # Force an online check
-grok-switch update                # Check and update with confirmation
-grok-switch update --yes          # Update non-interactively
-grok-switch update rollback       # Restore the retained previous version
+grok-switch update          # Check + update (interactive)
+grok-switch update --yes   # Non-interactive update
+grok-switch update rollback # Restore previous version
 ```
 
-The updater selects the release binary for the current architecture, verifies its SHA-256 digest and embedded version, then performs an atomic replacement in the same directory. The previous binary is retained as `grok-switch.previous`.
-
-Set `GROK_SWITCH_UPDATE_MODE=auto` to enable automatic installation. The target binary must be writable by the current user. A default installation in `/usr/local/bin` will usually require:
-
-```bash
-sudo grok-switch update
-```
+Previous binary kept as `grok-switch.previous`. Auto mode: `GROK_SWITCH_UPDATE_MODE=auto`.
 
 ## Exit codes
 
@@ -216,11 +207,11 @@ sudo grok-switch update
 | 0 | Success |
 | 1 | Runtime error |
 | 2 | Usage error |
-| 3 | `status`: on-disk configuration is unmanaged, unknown, or does not match the active profile |
+| 3 | `status`: unmanaged/unknown or profile mismatch |
 | 4 | Profile not found |
 | 5 | Lock timeout |
-| 6 | Configuration parsing failed |
-| 7 | Backup or restore failed |
+| 6 | Config parsing failed |
+| 7 | Backup/restore failed |
 
 ---
 
