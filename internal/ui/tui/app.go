@@ -387,7 +387,14 @@ func (a *App) doCreate(p profiles.Profile) tea.Cmd {
 		if err != nil {
 			return ErrMsg{Err: err}
 		}
-		return DoneMsg{Payload: InfoMsg{Text: "已添加供应商 " + created.Name}}
+
+		// Auto-activate the newly created profile to update config.toml
+		res, err := switcher.Activate(created.ID, a.store, a.paths.GrokConfig, a.paths.BackupsDir)
+		if err != nil {
+			return ErrMsg{Err: fmt.Errorf("profile created but activation failed: %w", err)}
+		}
+
+		return DoneMsg{Payload: InfoMsg{Text: fmt.Sprintf("已添加并切换到供应商 %s (备份: %s)", res.Profile.Name, res.BackupName)}}
 	}
 }
 
@@ -398,7 +405,14 @@ func (a *App) doUpdate(id string) func(profiles.Profile) tea.Cmd {
 			if err != nil {
 				return ErrMsg{Err: err}
 			}
-			return DoneMsg{Payload: InfoMsg{Text: "已更新供应商 " + p.Name}}
+
+			// Auto-activate the updated profile
+			res, err := switcher.Activate(id, a.store, a.paths.GrokConfig, a.paths.BackupsDir)
+			if err != nil {
+				return ErrMsg{Err: fmt.Errorf("profile updated but activation failed: %w", err)}
+			}
+
+			return DoneMsg{Payload: InfoMsg{Text: fmt.Sprintf("已更新并切换到供应商 %s (备份: %s)", res.Profile.Name, res.BackupName)}}
 		}
 	}
 }
