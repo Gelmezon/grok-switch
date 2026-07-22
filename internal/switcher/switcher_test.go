@@ -1,8 +1,10 @@
 package switcher
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -160,14 +162,14 @@ func TestStatusMatchMismatch(t *testing.T) {
 	s, cfg, bakDir := env(t)
 	a := makeProfile(t, s, "relay-a", "grok-4")
 	st, err := ActiveStatus(s, cfg)
-	if err != nil || st.HasActive {
+	if err != nil || st.Mode != StatusOfficial || st.Profile != nil {
 		t.Fatalf("no active: %+v %v", st, err)
 	}
 	if _, err := Activate(a.ID, s, cfg, bakDir); err != nil {
 		t.Fatal(err)
 	}
 	st, err = ActiveStatus(s, cfg)
-	if err != nil || !st.HasActive || !st.DiskMatches {
+	if err != nil || st.Mode != StatusManagedRelay || st.Profile == nil {
 		t.Fatalf("want match: %+v %v", st, err)
 	}
 	// Corrupt match by editing key.
@@ -190,9 +192,114 @@ api_key = "sk-relay-a-key-0001"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.DiskMatches {
+	if st.Mode != StatusUnmanagedOrUnknown || st.Profile == nil {
 		t.Fatal("expected mismatch")
 	}
+}
+
+func TestStatusRelayWithoutActiveProfileIsUnknown(t *testing.T) {
+	s, cfg, _ := env(t)
+	a := makeProfile(t, s, "relay-a", "grok-4")
+	if err := config.Apply(cfg, a); err != nil {
+		t.Fatal(err)
+	}
+	st, err := ActiveStatus(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode != StatusUnmanagedOrUnknown || st.Profile != nil {
+		t.Fatalf("want unmanaged-or-unknown without profile, got %+v", st)
+	}
+}
+
+func TestActivateRollsBackWhenProfilesCommitFails(t *testing.T) {
+	s, cfg, bakDir := env(t)
+	a := makeProfile(t, s, "relay-a", "grok-4")
+	before, _ := os.ReadFile(cfg)
+	failNextProfilesWrite(t, bakDir)
+
+	_, err := Activate(a.ID, s, cfg, bakDir)
+	if err == nil || !strings.Contains(err.Error(), "已从备份恢复配置") {
+		t.Fatalf("expected committed-state failure with rollback, got %v", err)
+	}
+	after, _ := os.ReadFile(cfg)
+	if string(after) != string(before) {
+		t.Fatalf("config was not rolled back\nwant: %s\ngot: %s", before, after)
+	}
+	got, getErr := s.Get(a.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if got.IsActive {
+		t.Fatal("profile state should remain unchanged")
+	}
+}
+
+func TestActivateOfficialRollsBackWhenProfilesCommitFails(t *testing.T) {
+	s, cfg, bakDir := env(t)
+	a := makeProfile(t, s, "relay-a", "grok-4")
+	if _, err := Activate(a.ID, s, cfg, bakDir); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(cfg)
+	failNextProfilesWrite(t, bakDir)
+
+	_, err := ActivateOfficial(s, cfg, bakDir)
+	if err == nil || !strings.Contains(err.Error(), "已从备份恢复配置") {
+		t.Fatalf("expected committed-state failure with rollback, got %v", err)
+	}
+	after, _ := os.ReadFile(cfg)
+	if string(after) != string(before) {
+		t.Fatal("relay config was not restored after official commit failed")
+	}
+	got, getErr := s.Get(a.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if !got.IsActive {
+		t.Fatal("active profile should remain unchanged")
+	}
+}
+
+func TestRestoreRollsBackWhenProfilesCommitFails(t *testing.T) {
+	s, cfg, bakDir := env(t)
+	a := makeProfile(t, s, "relay-a", "grok-4")
+	res, err := Activate(a.ID, s, cfg, bakDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(cfg)
+	failNextProfilesWrite(t, bakDir)
+
+	_, err = Restore(s, bakDir, res.BackupName, cfg)
+	if err == nil || !strings.Contains(err.Error(), "已从备份恢复配置") {
+		t.Fatalf("expected committed-state failure with rollback, got %v", err)
+	}
+	after, _ := os.ReadFile(cfg)
+	if string(after) != string(before) {
+		t.Fatal("pre-restore config was not restored after profile commit failed")
+	}
+	got, getErr := s.Get(a.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if !got.IsActive {
+		t.Fatal("active profile should remain unchanged")
+	}
+}
+
+func failNextProfilesWrite(t *testing.T, backupsDir string) {
+	t.Helper()
+	profilesPath := filepath.Join(filepath.Dir(backupsDir), "profiles.json")
+	tempPath := profilesPath + ".tmp-" + strconv.Itoa(os.Getpid())
+	if err := os.Mkdir(tempPath, 0o700); err != nil {
+		t.Fatalf("create profiles write blocker: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+			t.Errorf("remove profiles write blocker %s: %v", fmt.Sprintf("%q", tempPath), err)
+		}
+	})
 }
 
 func TestRestorePathTraversal(t *testing.T) {

@@ -153,6 +153,7 @@ grok-switch update rollback
 | `grok-switch` / `tui` | 全屏 TUI |
 | `add` / `edit` / `delete` / `show` / `list` | Profile 管理 |
 | `use` / `status` / `official` | 切换与状态 |
+| `test <name-or-id>` | 分别测试认证、Models 端点和 Chat Completions |
 | `import-current <name>` | 从当前 config.toml 导入 |
 | `backup list\|restore\|prune` | 备份 |
 | `update check` / `update` / `update rollback` | 检查、安装和回退程序版本 |
@@ -182,6 +183,12 @@ grok-switch update rollback
 - API Key 不入参数、日志、history
 - 数据目录 `0700`，敏感文件 `0600`，入口 `umask(0077)`
 - 原子写入 + 切换前备份 + `flock` 并发保护
+- Profile 状态最终落盘失败时，自动从本次备份回滚 `config.toml`
+- 修改 TOML 时保留注释、空行、字段顺序和受管段内的未知字段
+
+`status` 将配置分为 `official`、`managed-relay` 和 `unmanaged-or-unknown`。只有所有受管字段均与活动 Profile 一致时才属于 `managed-relay`；没有活动 Profile 也不会自动假定为官方配置。
+
+`test` 会分别报告 `authentication_ok`、`models_endpoint_ok` 和 `chat_completion_ok`。整体结果只以 Chat Completions 是否成功为准，`/models` 成功不会掩盖聊天接口缺失。目前仅支持 `openai_chat` 探测格式。
 
 ## 自动更新
 
@@ -209,7 +216,7 @@ sudo grok-switch update
 | 0 | 成功 |
 | 1 | 运行错误 |
 | 2 | 用法错误 |
-| 3 | status：磁盘与 Profile 不一致 |
+| 3 | status：磁盘配置未托管、未知或与活动 Profile 不一致 |
 | 4 | Profile 不存在 |
 | 5 | 锁超时 |
 | 6 | 配置解析失败 |

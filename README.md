@@ -153,6 +153,7 @@ grok-switch update rollback
 | `grok-switch` / `tui` | Start the full-screen TUI |
 | `add` / `edit` / `delete` / `show` / `list` | Manage profiles |
 | `use` / `status` / `official` | Switch configurations and inspect status |
+| `test <name-or-id>` | Test authentication, the Models endpoint, and Chat Completions separately |
 | `import-current <name>` | Import the current `config.toml` as a profile |
 | `backup list\|restore\|prune` | Manage backups |
 | `update check` / `update` / `update rollback` | Check, install, or roll back application updates |
@@ -182,6 +183,12 @@ grok-switch update rollback
 - API keys never appear in command-line arguments, logs, or shell history
 - Data directories use mode `0700`, sensitive files use `0600`, and the process starts with `umask(0077)`
 - Atomic writes, pre-switch backups, and `flock`-based concurrency protection
+- Automatic `config.toml` rollback when the final profile-state commit fails
+- TOML updates preserve comments, blank lines, field ordering, and unknown fields inside managed sections
+
+`status` classifies the configuration as `official`, `managed-relay`, or `unmanaged-or-unknown`. A configuration is `managed-relay` only when every managed field matches the active profile; the absence of an active profile is not automatically treated as official mode.
+
+`test` reports `authentication_ok`, `models_endpoint_ok`, and `chat_completion_ok` separately. The overall result succeeds only when Chat Completions works, so a successful `/models` response cannot hide a missing chat endpoint. Probe support is currently limited to the `openai_chat` format.
 
 ## Self-updates
 
@@ -209,7 +216,7 @@ sudo grok-switch update
 | 0 | Success |
 | 1 | Runtime error |
 | 2 | Usage error |
-| 3 | `status`: on-disk configuration does not match the active profile |
+| 3 | `status`: on-disk configuration is unmanaged, unknown, or does not match the active profile |
 | 4 | Profile not found |
 | 5 | Lock timeout |
 | 6 | Configuration parsing failed |

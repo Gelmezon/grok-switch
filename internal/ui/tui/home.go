@@ -56,10 +56,10 @@ func NewHome(version, configPath string, list []profiles.Profile, st switcher.St
 		showBanner: true,
 		focus:      focusList,
 	}
-	// Default cursor: official when no mid-station active
-	if !st.HasActive {
+	// Default cursor: official only when the on-disk config is official.
+	if st.Mode == switcher.StatusOfficial {
 		m.cursor = 0
-	} else {
+	} else if st.Profile != nil {
 		items := m.items()
 		for i, it := range items {
 			if !it.official && it.profile.IsActive {
@@ -157,7 +157,7 @@ func (m *HomeModel) Update(msg tea.Msg) (Screen, tea.Cmd) {
 				return m, nil
 			}
 			if sel.official {
-				if !m.status.HasActive {
+				if m.status.Mode == switcher.StatusOfficial {
 					m.toast = "当前已是官方配置"
 					return m, nil
 				}
@@ -251,9 +251,12 @@ func (m *HomeModel) View() string {
 	// Top status bar
 	activeName := models.OfficialName
 	activeModel := "Grok 官方认证"
-	if m.status.HasActive && m.status.Profile != nil {
+	if m.status.Profile != nil {
 		activeName = m.status.Profile.Name
 		activeModel = m.status.Profile.DefaultModel
+	} else if m.status.Mode == switcher.StatusUnmanagedOrUnknown {
+		activeName = "未托管或未知"
+		activeModel = ""
 	}
 	topLeft := theme.Title.Render(fmt.Sprintf(" grok-switch  %s ", ui.VersionLabel(m.version)))
 	topRight := theme.Success.Render(theme.SymActive + " " + activeName)
@@ -296,7 +299,7 @@ func (m *HomeModel) View() string {
 		var label string
 		var isActive bool
 		if it.official {
-			isActive = !m.status.HasActive
+			isActive = m.status.Mode == switcher.StatusOfficial
 			label = fmt.Sprintf("%s %s  官方认证", theme.SymActive, models.OfficialName)
 			if !isActive {
 				label = fmt.Sprintf("%s %s  官方认证", theme.SymInactive, models.OfficialName)
@@ -335,8 +338,10 @@ func (m *HomeModel) View() string {
 		right.WriteString(theme.Field("名称", models.OfficialName) + "\n")
 		right.WriteString(theme.Field("类型", "Grok 内置官方认证") + "\n")
 		right.WriteString(theme.Field("说明", "不写入中间站 endpoints/model") + "\n\n")
-		if !m.status.HasActive {
+		if m.status.Mode == switcher.StatusOfficial {
 			right.WriteString(theme.Field("状态", theme.Success.Render(theme.SymActive+" 当前活动（默认）")) + "\n")
+		} else if m.status.Mode == switcher.StatusUnmanagedOrUnknown && m.status.Profile == nil {
+			right.WriteString(theme.Field("状态", theme.Warning.Render(theme.SymWarn+" 磁盘配置未托管或未知")) + "\n")
 		} else {
 			right.WriteString(theme.Field("状态", theme.Muted.Render(theme.SymInactive+" 非活动")) + "\n")
 		}
@@ -353,7 +358,7 @@ func (m *HomeModel) View() string {
 		right.WriteString(theme.Field("ID", p.ID) + "\n\n")
 		if p.IsActive {
 			right.WriteString(theme.Field("状态", theme.Success.Render(theme.SymActive+" 活动")) + "\n")
-			if m.status.DiskMatches {
+			if m.status.Mode == switcher.StatusManagedRelay && m.status.Profile != nil && m.status.Profile.ID == p.ID {
 				right.WriteString(theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与供应商一致")) + "\n")
 			} else {
 				right.WriteString(theme.Field("磁盘配置", theme.Warning.Render(theme.SymWarn+" 不一致")) + "\n")

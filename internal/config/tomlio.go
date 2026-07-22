@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/Gelmezon/grok-switch/internal/atomicfile"
@@ -39,162 +40,135 @@ func MustLoad(configPath string) (map[string]interface{}, error) {
 	return Load(configPath)
 }
 
-// Apply writes Profile fields into config.toml, preserving unknown top-level sections.
+// Apply writes Profile fields into config.toml while preserving source layout
+// and unknown fields, including unknown fields inside managed sections.
 func Apply(configPath string, p profiles.Profile) error {
-	data, err := Load(configPath)
+	raw, err := readConfigBytes(configPath)
 	if err != nil {
 		return err
 	}
-	applyProfile(data, p)
-	return atomicWriteTOML(configPath, data)
+	if _, err := Load(configPath); err != nil {
+		return err
+	}
+	rewritten, err := rewriteManagedTOML(raw, desiredManagedValues(p))
+	if err != nil {
+		return fmt.Errorf("更新配置失败: %w", err)
+	}
+	return atomicWriteAndVerify(configPath, rewritten)
 }
 
-// applyProfile mutates data in-place with profile values.
-func applyProfile(data map[string]interface{}, p profiles.Profile) {
-	// endpoints
-	data["endpoints"] = map[string]interface{}{
-		"api_url": p.BaseURL,
-	}
-
-	// models
-	data["models"] = map[string]interface{}{
-		"default":    p.DefaultModel,
-		"web_search": nonEmpty(p.WebSearchModel, p.DefaultModel),
-	}
-
-	// subagents.models
-	explore := nonEmpty(p.SubagentsModels.Explore, p.DefaultModel)
-	plan := nonEmpty(p.SubagentsModels.Plan, p.DefaultModel)
-	data["subagents"] = map[string]interface{}{
-		"models": map[string]interface{}{
-			"explore": explore,
-			"plan":    plan,
-		},
-	}
-
-	// Remove all existing model.* sections, then write new ones.
-	// pelletier/go-toml represents [model.xxx] as nested maps under "model".
-	// Also handle flat keys if present.
-	delete(data, "model")
-
-	// Build model definitions.
-	modelMap := map[string]interface{}{}
-
-	// Primary default model section.
-	effort := nonEmpty(p.DefaultReasoningEffort, "high")
-	modelMap[p.DefaultModel] = map[string]interface{}{
-		"model":                      p.DefaultModel,
-		"api_key":                    p.APIKey,
-		"supports_reasoning_effort":  true,
-		"reasoning_effort":           effort,
-		"reasoning_efforts":          []interface{}{"low", "medium", "high"},
-	}
-
-	// Additional models from profile.Models.
-	for _, m := range p.Models {
-		id := m.ID
-		if id == "" {
-			id = m.Model
-		}
-		if id == "" {
-			continue
-		}
-		entry := map[string]interface{}{
-			"model":                     nonEmpty(m.Model, id),
-			"supports_reasoning_effort": m.SupportsReasoningEffort,
-		}
-		key := m.APIKey
-		if key == "" {
-			key = p.APIKey
-		}
-		entry["api_key"] = key
-		if m.ReasoningEffort != "" {
-			entry["reasoning_effort"] = m.ReasoningEffort
-		} else {
-			entry["reasoning_effort"] = effort
-		}
-		if len(m.ReasoningEfforts) > 0 {
-			arr := make([]interface{}, len(m.ReasoningEfforts))
-			for i, v := range m.ReasoningEfforts {
-				arr[i] = v
-			}
-			entry["reasoning_efforts"] = arr
-		} else {
-			entry["reasoning_efforts"] = []interface{}{"low", "medium", "high"}
-		}
-		modelMap[id] = entry
-	}
-
-	// Also ensure web_search / explore / plan models have entries if different.
-	for _, mid := range []string{
-		nonEmpty(p.WebSearchModel, p.DefaultModel),
-		explore,
-		plan,
-	} {
-		if _, ok := modelMap[mid]; !ok {
-			modelMap[mid] = map[string]interface{}{
-				"model":                     mid,
-				"api_key":                   p.APIKey,
-				"supports_reasoning_effort": true,
-				"reasoning_effort":          effort,
-				"reasoning_efforts":         []interface{}{"low", "medium", "high"},
-			}
-		}
-	}
-
-	data["model"] = modelMap
-}
-
-// Match compares key config fields against a profile.
+// Match compares every field managed by Apply against a profile. Unknown TOML
+// fields are deliberately ignored so future Grok settings remain compatible.
 func Match(configPath string, p profiles.Profile) (bool, error) {
 	data, err := Load(configPath)
 	if err != nil {
 		return false, err
 	}
-	apiURL := nestedString(data, "endpoints", "api_url")
-	defModel := nestedString(data, "models", "default")
-	apiKey := modelAPIKey(data, p.DefaultModel)
-	if apiKey == "" {
-		// Fallback: any model section key.
-		apiKey = firstModelAPIKey(data)
+	if strings.TrimRight(nestedString(data, "endpoints", "api_url"), "/") != strings.TrimRight(p.BaseURL, "/") {
+		return false, nil
+	}
+	if nestedString(data, "models", "default") != p.DefaultModel ||
+		nestedString(data, "models", "web_search") != nonEmpty(p.WebSearchModel, p.DefaultModel) ||
+		nestedString(data, "subagents", "models", "explore") != nonEmpty(p.SubagentsModels.Explore, p.DefaultModel) ||
+		nestedString(data, "subagents", "models", "plan") != nonEmpty(p.SubagentsModels.Plan, p.DefaultModel) {
+		return false, nil
 	}
 
-	base := strings.TrimRight(p.BaseURL, "/")
-	got := strings.TrimRight(apiURL, "/")
-	if base != got {
+	expected := desiredModelSections(p)
+	actual, ok := data["model"].(map[string]interface{})
+	if !ok {
 		return false, nil
 	}
-	if defModel != p.DefaultModel {
+	actualManaged := make(map[string]map[string]interface{})
+	for id, rawSection := range actual {
+		section, ok := rawSection.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for key := range managedModelKeys {
+			if _, exists := section[key]; exists {
+				actualManaged[id] = section
+				break
+			}
+		}
+	}
+	if len(actualManaged) != len(expected) {
 		return false, nil
 	}
-	if apiKey != p.APIKey {
-		return false, nil
+	for id, want := range expected {
+		got, exists := actualManaged[id]
+		if !exists || !managedModelEqual(got, want) {
+			return false, nil
+		}
 	}
 	return true, nil
+}
+
+// IsOfficial reports whether none of the relay fields managed by grok-switch
+// are present. Unknown settings do not make an otherwise official config fail.
+func IsOfficial(configPath string) (bool, error) {
+	data, err := Load(configPath)
+	if err != nil {
+		return false, err
+	}
+	return isOfficialData(data), nil
+}
+
+func isOfficialData(data map[string]interface{}) bool {
+	for _, path := range [][]string{
+		{"endpoints", "api_url"},
+		{"models", "default"},
+		{"models", "web_search"},
+		{"subagents", "models", "explore"},
+		{"subagents", "models", "plan"},
+	} {
+		if nestedExists(data, path...) {
+			return false
+		}
+	}
+	if modelMap, ok := data["model"].(map[string]interface{}); ok {
+		for _, rawSection := range modelMap {
+			section, ok := rawSection.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			for key := range managedModelKeys {
+				if _, exists := section[key]; exists {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 // ApplyOfficial removes mid-station related sections while preserving others.
 // Must NOT wipe the entire file.
 func ApplyOfficial(configPath string) error {
-	data, err := Load(configPath)
+	raw, err := readConfigBytes(configPath)
 	if err != nil {
 		return err
 	}
-	delete(data, "endpoints")
-	delete(data, "models")
-	delete(data, "model")
-
-	// Remove subagents.models but keep other subagents fields if any.
-	if sub, ok := data["subagents"].(map[string]interface{}); ok {
-		delete(sub, "models")
-		if len(sub) == 0 {
-			delete(data, "subagents")
-		} else {
-			data["subagents"] = sub
+	if _, err := Load(configPath); err != nil {
+		return err
+	}
+	rewritten, err := removeManagedTOML(raw)
+	if err != nil {
+		return fmt.Errorf("更新官方配置失败: %w", err)
+	}
+	var rewrittenData map[string]interface{}
+	if len(strings.TrimSpace(string(rewritten))) > 0 {
+		if err := toml.Unmarshal(rewritten, &rewrittenData); err != nil {
+			return fmt.Errorf("更新官方配置失败: %w", err)
 		}
 	}
-
-	return atomicWriteTOML(configPath, data)
+	if rewrittenData == nil {
+		rewrittenData = map[string]interface{}{}
+	}
+	if !isOfficialData(rewrittenData) {
+		return fmt.Errorf("更新官方配置失败: 当前 TOML 使用了不支持的内联受管表格式")
+	}
+	return atomicWriteAndVerify(configPath, rewritten)
 }
 
 // ImportFromConfig extracts a Profile skeleton from the current config.toml.
@@ -257,6 +231,164 @@ func AtomicWriteFile(path string, content []byte) error {
 	return atomicfile.Write(path, content)
 }
 
+func readConfigBytes(path string) ([]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []byte{}, nil
+		}
+		return nil, fmt.Errorf("读取配置失败: %w", err)
+	}
+	return raw, nil
+}
+
+func atomicWriteAndVerify(path string, raw []byte) error {
+	if err := atomicfile.Write(path, raw); err != nil {
+		return fmt.Errorf("写入配置失败: %w", err)
+	}
+	if _, err := Load(path); err != nil {
+		return fmt.Errorf("写入后校验失败: %w", err)
+	}
+	return nil
+}
+
+func desiredManagedValues(p profiles.Profile) []managedValue {
+	explore := nonEmpty(p.SubagentsModels.Explore, p.DefaultModel)
+	plan := nonEmpty(p.SubagentsModels.Plan, p.DefaultModel)
+	values := []managedValue{
+		{path: []string{"endpoints", "api_url"}, value: p.BaseURL},
+		{path: []string{"models", "default"}, value: p.DefaultModel},
+		{path: []string{"models", "web_search"}, value: nonEmpty(p.WebSearchModel, p.DefaultModel)},
+		{path: []string{"subagents", "models", "explore"}, value: explore},
+		{path: []string{"subagents", "models", "plan"}, value: plan},
+	}
+	sections := desiredModelSections(p)
+	for _, id := range sortedModelIDs(sections) {
+		section := sections[id]
+		for _, key := range []string{"model", "api_key", "supports_reasoning_effort", "reasoning_effort", "reasoning_efforts"} {
+			values = append(values, managedValue{path: []string{"model", id, key}, value: section[key]})
+		}
+	}
+	return values
+}
+
+func desiredModelSections(p profiles.Profile) map[string]map[string]interface{} {
+	effort := nonEmpty(p.DefaultReasoningEffort, "high")
+	sections := map[string]map[string]interface{}{
+		p.DefaultModel: {
+			"model":                     p.DefaultModel,
+			"api_key":                   p.APIKey,
+			"supports_reasoning_effort": true,
+			"reasoning_effort":          effort,
+			"reasoning_efforts":         []string{"low", "medium", "high"},
+		},
+	}
+	for _, m := range p.Models {
+		id := nonEmpty(m.ID, m.Model)
+		if id == "" {
+			continue
+		}
+		key := nonEmpty(m.APIKey, p.APIKey)
+		reasoningEffort := nonEmpty(m.ReasoningEffort, effort)
+		reasoningEfforts := append([]string(nil), m.ReasoningEfforts...)
+		if len(reasoningEfforts) == 0 {
+			reasoningEfforts = []string{"low", "medium", "high"}
+		}
+		sections[id] = map[string]interface{}{
+			"model":                     nonEmpty(m.Model, id),
+			"api_key":                   key,
+			"supports_reasoning_effort": m.SupportsReasoningEffort,
+			"reasoning_effort":          reasoningEffort,
+			"reasoning_efforts":         reasoningEfforts,
+		}
+	}
+	for _, id := range []string{nonEmpty(p.WebSearchModel, p.DefaultModel), nonEmpty(p.SubagentsModels.Explore, p.DefaultModel), nonEmpty(p.SubagentsModels.Plan, p.DefaultModel)} {
+		if _, ok := sections[id]; !ok {
+			sections[id] = map[string]interface{}{
+				"model":                     id,
+				"api_key":                   p.APIKey,
+				"supports_reasoning_effort": true,
+				"reasoning_effort":          effort,
+				"reasoning_efforts":         []string{"low", "medium", "high"},
+			}
+		}
+	}
+	return sections
+}
+
+func sortedModelIDs(sections map[string]map[string]interface{}) []string {
+	ids := make([]string, 0, len(sections))
+	for id := range sections {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func managedModelEqual(got, want map[string]interface{}) bool {
+	for key := range managedModelKeys {
+		if _, exists := got[key]; !exists {
+			return false
+		}
+	}
+	for _, key := range []string{"model", "api_key", "reasoning_effort"} {
+		if asString(got[key]) != asString(want[key]) {
+			return false
+		}
+	}
+	if asBool(got["supports_reasoning_effort"]) != asBool(want["supports_reasoning_effort"]) {
+		return false
+	}
+	return equalStringSlice(asStringSlice(got["reasoning_efforts"]), asStringSlice(want["reasoning_efforts"]))
+}
+
+func nestedExists(data map[string]interface{}, keys ...string) bool {
+	var current interface{} = data
+	for _, key := range keys {
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		current, ok = m[key]
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func asBool(v interface{}) bool {
+	b, _ := v.(bool)
+	return b
+}
+
+func asStringSlice(v interface{}) []string {
+	switch values := v.(type) {
+	case []string:
+		return append([]string(nil), values...)
+	case []interface{}:
+		out := make([]string, len(values))
+		for i, value := range values {
+			out[i] = asString(value)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func nonEmpty(v, def string) string {
 	if v == "" {
 		return def
@@ -283,6 +415,8 @@ func asString(v interface{}) string {
 	switch t := v.(type) {
 	case string:
 		return t
+	case nil:
+		return ""
 	default:
 		return fmt.Sprint(t)
 	}

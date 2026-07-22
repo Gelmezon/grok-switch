@@ -117,8 +117,8 @@ func runStatus(args []string) error {
 		return err
 	}
 	fmt.Print(ui.RenderStatus(st, Version))
-	if st.HasActive && !st.DiskMatches {
-		return &exitcodes.MismatchError{Msg: "磁盘配置与活动供应商不匹配"}
+	if st.Mode == switcher.StatusUnmanagedOrUnknown {
+		return &exitcodes.MismatchError{Msg: "磁盘配置未被 grok-switch 管理或与活动供应商不匹配"}
 	}
 	return nil
 }
@@ -144,7 +144,7 @@ func runTest(args []string) error {
 	}
 	var result probe.Result
 	err = ui.WithSpinner(fmt.Sprintf("正在测试 %s / %s ...", p.Name, p.DefaultModel), func() error {
-		result = probe.TestModel(p.BaseURL, p.APIKey, p.DefaultModel, *timeout)
+		result = probe.TestProfile(p, *timeout)
 		return nil
 	})
 	if err != nil {
@@ -213,8 +213,10 @@ func runUse(args []string) error {
 	if ui.Interactive() && !*yes {
 		st, _ := switcher.ActiveStatus(ctx.Store, ctx.Paths.GrokConfig)
 		from := "（无）"
-		if st.HasActive && st.Profile != nil {
+		if st.Profile != nil {
 			from = st.Profile.Name + "  " + st.Profile.DefaultModel
+		} else if st.Mode == switcher.StatusUnmanagedOrUnknown {
+			from = "未托管或未知配置"
 		}
 		fmt.Println(theme.BoxWarning.Render(fmt.Sprintf(
 			"%s  切换供应商\n\n从  %s\n到  %s  %s\n\n备份将自动保存到 %s\n\n确认？ [y/N] ",
