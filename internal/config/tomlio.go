@@ -73,6 +73,19 @@ func Match(configPath string, p profiles.Profile) (bool, error) {
 		nestedString(data, "subagents", "models", "plan") != nonEmpty(p.SubagentsModels.Plan, p.DefaultModel) {
 		return false, nil
 	}
+	if p.CodebaseUploadDisabled() {
+		for _, item := range desiredPrivacyValues(true) {
+			if !nestedExists(data, item.path...) || asBool(nestedValue(data, item.path...)) != item.value.(bool) {
+				return false, nil
+			}
+		}
+	} else {
+		for _, path := range managedPrivacyPaths {
+			if nestedExists(data, path...) {
+				return false, nil
+			}
+		}
+	}
 
 	expected := desiredModelSections(p)
 	actual, ok := data["model"].(map[string]interface{})
@@ -216,6 +229,9 @@ func ImportFromConfig(configPath, name string) (profiles.Profile, error) {
 			Plan:    plan,
 		},
 	}
+	if nestedExists(data, "harness", "disable_codebase_upload") {
+		p.SetCodebaseUploadDisabled(asBool(nestedValue(data, "harness", "disable_codebase_upload")))
+	}
 	profiles.Normalize(&p)
 	if err := profiles.Validate(p); err != nil {
 		return profiles.Profile{}, fmt.Errorf("当前配置缺少必要字段，无法导入: %w", err)
@@ -275,6 +291,7 @@ func desiredManagedValues(p profiles.Profile) []managedValue {
 		{path: []string{"subagents", "models", "explore"}, value: explore},
 		{path: []string{"subagents", "models", "plan"}, value: plan},
 	}
+	values = append(values, desiredPrivacyValues(p.CodebaseUploadDisabled())...)
 	sections := desiredModelSections(p)
 	for _, id := range sortedModelIDs(sections) {
 		section := sections[id]
@@ -283,6 +300,18 @@ func desiredManagedValues(p profiles.Profile) []managedValue {
 		}
 	}
 	return values
+}
+
+func desiredPrivacyValues(disabled bool) []managedValue {
+	if !disabled {
+		return nil
+	}
+	return []managedValue{
+		{path: []string{"features", "telemetry"}, value: false},
+		{path: []string{"features", "codebase_indexing"}, value: false},
+		{path: []string{"telemetry", "trace_upload"}, value: false},
+		{path: []string{"harness", "disable_codebase_upload"}, value: true},
+	}
 }
 
 func desiredModelSections(p profiles.Profile) map[string]map[string]interface{} {
@@ -405,6 +434,21 @@ func nestedExists(data map[string]interface{}, keys ...string) bool {
 		}
 	}
 	return true
+}
+
+func nestedValue(data map[string]interface{}, keys ...string) interface{} {
+	var current interface{} = data
+	for _, key := range keys {
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		current, ok = m[key]
+		if !ok {
+			return nil
+		}
+	}
+	return current
 }
 
 func asBool(v interface{}) bool {

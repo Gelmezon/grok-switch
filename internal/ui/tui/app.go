@@ -244,8 +244,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if st.Mode == switcher.StatusUnmanagedOrUnknown {
 			cur = theme.SymWarn + " 未托管或未知配置"
 		}
-		body := fmt.Sprintf("从  %s\n到  %s %s  %s\n\n切换时将自动同步中间站 /models。\n备份将自动保存到 %s",
-			cur, theme.SymInactive, p.Name, p.DefaultModel, a.paths.BackupsDir)
+		privacy := "禁止上传源代码"
+		if !p.CodebaseUploadDisabled() {
+			privacy = "允许源代码上传"
+		}
+		body := fmt.Sprintf("从  %s\n到  %s %s  %s\n隐私  %s\n\n切换时将自动同步中间站 /models。\n备份将自动保存到 %s",
+			cur, theme.SymInactive, p.Name, p.DefaultModel, privacy, a.paths.BackupsDir)
 		return a, a.push(NewConfirm("切换供应商", body, "确认切换", true, func() tea.Cmd {
 			return func() tea.Msg {
 				p, err := probe.DiscoverProfileModels(p, 20*time.Second)

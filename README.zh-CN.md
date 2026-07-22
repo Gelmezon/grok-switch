@@ -37,6 +37,7 @@
 | 想临时恢复 Grok 官方认证 | `official` 会移除由本工具管理的中间站字段，同时保留其他 Grok 设置。 |
 | 服务器没有桌面环境 | 提供一个 Linux 单二进制，同时支持全屏 TUI、普通 CLI、管道和 CI。 |
 | API Key 可能出现在 history 或 `ps` | 不提供 `--api-key` 参数；支持隐藏输入、标准输入和环境变量，配置文件使用严格权限。 |
+| 不希望遥测、索引或 Harness 上传代码库 | “禁止上传源代码”默认开启，并随活动 Profile 写入 Grok 的隐私配置；也可以由用户明确关闭。 |
 
 ## 一次切换实际做了什么
 
@@ -224,6 +225,36 @@ grok-switch update rollback
 - 原子写入 + 自动备份 + 回滚。
 - `status` 显示 `official` / `managed-relay` / `unmanaged`。
 - `test` 分别验证认证、Models、Chat Completions。
+
+## 禁止上传源代码
+
+每个 Profile 都有一个“禁止上传源代码”开关，**默认开启**。在 TUI 的添加/编辑界面中，按 `Tab` 移动到隐私设置，再按 `Space` 切换。保护开启后，下次执行 `use` 会在 `~/.grok/config.toml` 中生成：
+
+```toml
+[features]
+telemetry = false
+codebase_indexing = false
+
+[telemetry]
+trace_upload = false
+
+[harness]
+disable_codebase_upload = true
+```
+
+纯 CLI 可以使用：
+
+```bash
+# 默认值：禁止上传
+grok-switch add relay-a --base-url https://relay.example.com/v1 \
+  --codebase-upload deny
+
+# 修改现有 Profile，然后重新切换使配置生效
+grok-switch edit relay-a --codebase-upload allow
+grok-switch use relay-a
+```
+
+`deny` 会写入上面的四个字段；`allow` 会移除这四个由 grok-switch 管理的字段，恢复 Grok 自身的默认行为，并不会主动将遥测或上传设置为 `true`。切回 `official` 时这些隐私设置会保留，因为它们不属于中间站路由配置。
 
 ## 自动更新
 

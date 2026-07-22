@@ -79,4 +79,30 @@ func TestWizardAddBuildCanBeSaved(t *testing.T) {
 	if created.DefaultModel != models.DefaultModel {
 		t.Fatalf("default model = %q, want %q", created.DefaultModel, models.DefaultModel)
 	}
+	if !created.CodebaseUploadDisabled() {
+		t.Fatal("new wizard profile should disable codebase upload by default")
+	}
+}
+
+func TestWizardCanAllowCodebaseUpload(t *testing.T) {
+	m := NewWizard("add", profiles.Profile{}, func(p profiles.Profile) tea.Cmd { return nil })
+	for range 3 {
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	}
+	if !m.privacyFocused {
+		t.Fatal("privacy toggle should be focused after tabbing past inputs")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	if m.build().CodebaseUploadDisabled() {
+		t.Fatal("space should turn off codebase upload protection")
+	}
+}
+
+func TestWizardEditPreservesExplicitUploadChoice(t *testing.T) {
+	p := profiles.Profile{}
+	p.SetCodebaseUploadDisabled(false)
+	m := NewWizard("edit", p, func(p profiles.Profile) tea.Cmd { return nil })
+	if m.disableCodebaseUpload || m.build().CodebaseUploadDisabled() {
+		t.Fatal("edit wizard should preserve explicit allow choice")
+	}
 }

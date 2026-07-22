@@ -254,7 +254,7 @@ func runUse(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(ui.RenderSwitchSuccess(res.Profile.Name, res.Profile.BaseURL, res.Profile.DefaultModel, res.BackupName))
+	fmt.Print(ui.RenderSwitchSuccess(res.Profile, res.BackupName))
 	return nil
 }
 
@@ -301,6 +301,7 @@ func runAdd(args []string) error {
 	plan := fs.String("plan-model", "", "")
 	apiKeyStdin := fs.Bool("api-key-stdin", false, "")
 	reasoning := fs.String("reasoning", "", "")
+	codebaseUpload := fs.String("codebase-upload", "", "deny|allow")
 	if err := fs.Parse(flagsAfterPositional(args)); err != nil {
 		return &exitcodes.UsageError{Msg: err.Error()}
 	}
@@ -315,7 +316,7 @@ func runAdd(args []string) error {
 		return err
 	}
 
-	nonInteractive := *baseURL != "" || *model != "" || *apiKeyStdin || os.Getenv("GROK_SWITCH_API_KEY") != "" || !ui.Interactive()
+	nonInteractive := *baseURL != "" || *model != "" || *apiKeyStdin || *codebaseUpload != "" || os.Getenv("GROK_SWITCH_API_KEY") != "" || !ui.Interactive()
 
 	var p profiles.Profile
 	if nonInteractive {
@@ -330,6 +331,9 @@ func runAdd(args []string) error {
 		p.SubagentsModels.Plan = *plan
 		if *reasoning != "" {
 			p.DefaultReasoningEffort = *reasoning
+		}
+		if err := applyCodebaseUploadOption(&p, *codebaseUpload); err != nil {
+			return err
 		}
 		key, err := readAPIKey(*apiKeyStdin)
 		if err != nil {
@@ -398,6 +402,13 @@ func runAddPrompts(ctx *appContext, name string) error {
 	if err != nil {
 		return err
 	}
+	privacy, err := promptDefault(in, "源代码上传 (deny/allow)", "deny")
+	if err != nil {
+		return err
+	}
+	if err := applyCodebaseUploadOption(&p, privacy); err != nil {
+		return err
+	}
 	p, err = discoverProfileModels(p)
 	if err != nil {
 		return err
@@ -417,6 +428,7 @@ func runEdit(args []string) error {
 	baseURL := fs.String("base-url", "", "")
 	model := fs.String("model", "", "")
 	apiKeyStdin := fs.Bool("api-key-stdin", false, "")
+	codebaseUpload := fs.String("codebase-upload", "", "deny|allow")
 	if err := fs.Parse(flagsAfterPositional(args)); err != nil {
 		return &exitcodes.UsageError{Msg: err.Error()}
 	}
@@ -433,7 +445,7 @@ func runEdit(args []string) error {
 		return err
 	}
 
-	nonInteractive := *baseURL != "" || *model != "" || *apiKeyStdin || os.Getenv("GROK_SWITCH_API_KEY") != "" || !ui.Interactive()
+	nonInteractive := *baseURL != "" || *model != "" || *apiKeyStdin || *codebaseUpload != "" || os.Getenv("GROK_SWITCH_API_KEY") != "" || !ui.Interactive()
 	p := cur
 	if nonInteractive {
 		if *baseURL != "" {
@@ -441,6 +453,9 @@ func runEdit(args []string) error {
 		}
 		if *model != "" {
 			p.DefaultModel = *model
+		}
+		if err := applyCodebaseUploadOption(&p, *codebaseUpload); err != nil {
+			return err
 		}
 		if *apiKeyStdin || os.Getenv("GROK_SWITCH_API_KEY") != "" {
 			key, err := readAPIKey(*apiKeyStdin)
@@ -465,6 +480,15 @@ func runEdit(args []string) error {
 		}
 		if v, _ := promptDefault(in, "Default model", cur.DefaultModel); v != "" {
 			p.DefaultModel = v
+		}
+		privacyDefault := "deny"
+		if !cur.CodebaseUploadDisabled() {
+			privacyDefault = "allow"
+		}
+		if v, promptErr := promptDefault(in, "源代码上传 (deny/allow)", privacyDefault); promptErr != nil {
+			return promptErr
+		} else if err := applyCodebaseUploadOption(&p, v); err != nil {
+			return err
 		}
 	}
 	p, err = discoverProfileModels(p)
@@ -568,7 +592,7 @@ func runImportCurrent(args []string) error {
 		if err != nil {
 			return fmt.Errorf("导入成功但激活失败: %w", err)
 		}
-		fmt.Print(ui.RenderSwitchSuccess(res.Profile.Name, res.Profile.BaseURL, res.Profile.DefaultModel, res.BackupName))
+		fmt.Print(ui.RenderSwitchSuccess(res.Profile, res.BackupName))
 	}
 	return nil
 }
@@ -676,6 +700,21 @@ func runBackupPrune(args []string) error {
 }
 
 // --- helpers ---
+
+func applyCodebaseUploadOption(p *profiles.Profile, option string) error {
+	switch strings.ToLower(strings.TrimSpace(option)) {
+	case "":
+		return nil
+	case "deny":
+		p.SetCodebaseUploadDisabled(true)
+		return nil
+	case "allow":
+		p.SetCodebaseUploadDisabled(false)
+		return nil
+	default:
+		return &exitcodes.UsageError{Msg: "--codebase-upload 仅支持 deny 或 allow"}
+	}
+}
 
 func promptLine(in *bufio.Reader, label string, allowEmpty bool) (string, error) {
 	fmt.Fprint(os.Stdout, label)

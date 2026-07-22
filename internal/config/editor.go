@@ -55,6 +55,13 @@ var managedModelKeys = map[string]bool{
 	"reasoning_efforts":         true,
 }
 
+var managedPrivacyPaths = [][]string{
+	{"features", "telemetry"},
+	{"features", "codebase_indexing"},
+	{"telemetry", "trace_upload"},
+	{"harness", "disable_codebase_upload"},
+}
+
 // rewriteManagedTOML changes only grok-switch-owned keys. All unrelated source
 // bytes (including comments, whitespace, ordering, and unknown fields inside
 // managed tables) are retained verbatim.
@@ -91,9 +98,9 @@ func rewriteManagedTOML(raw []byte, desired []managedValue) ([]byte, error) {
 			continue
 		}
 
-		// Managed keys in model sections that are not part of the new profile
+		// Managed model or privacy keys that are not part of the desired state
 		// are stale. Remove just those assignments and leave unknown fields.
-		if isManagedModelPath(expr.path) {
+		if isManagedModelPath(expr.path) || isManagedPrivacyPath(expr.path) {
 			removed[i] = true
 			patches = append(patches, removeExpressionPatch(raw, expr))
 		}
@@ -170,9 +177,9 @@ func rewriteManagedTOML(raw []byte, desired []managedValue) ([]byte, error) {
 	}
 
 	// Remove table headers that would otherwise become empty after stale
-	// managed model keys are removed. Comments in those tables remain intact.
+	// managed model/privacy keys are removed. Comments remain intact.
 	for key, table := range layout.tables {
-		if desiredTables[key] || !isModelTable(table.path) {
+		if desiredTables[key] || (!isModelTable(table.path) && !isPrivacyTable(table.path)) {
 			continue
 		}
 		if tableHasRemainingValues(layout, table.path, removed) {
@@ -426,6 +433,19 @@ func isTopLevelManagedPath(path []string) bool {
 
 func isManagedModelPath(path []string) bool {
 	return len(path) == 3 && path[0] == "model" && managedModelKeys[path[2]]
+}
+
+func isManagedPrivacyPath(path []string) bool {
+	for _, managed := range managedPrivacyPaths {
+		if equalPath(path, managed) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPrivacyTable(path []string) bool {
+	return len(path) == 1 && (path[0] == "features" || path[0] == "telemetry" || path[0] == "harness")
 }
 
 func isModelTable(path []string) bool {

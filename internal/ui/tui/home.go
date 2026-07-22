@@ -351,6 +351,11 @@ func (m *HomeModel) View() string {
 		right.WriteString(theme.Field("名称", p.Name) + "\n")
 		right.WriteString(theme.Field("Base URL", ui.Truncate(p.BaseURL, max(12, rightW-16))) + "\n")
 		right.WriteString(theme.Field("推理等级", p.DefaultReasoningEffort) + "\n")
+		privacy := theme.Warning.Render(theme.SymWarn + " 已允许")
+		if p.CodebaseUploadDisabled() {
+			privacy = theme.Success.Render(theme.SymOK + " 已禁止")
+		}
+		right.WriteString(theme.Field("源码上传", privacy) + "\n")
 		right.WriteString(theme.Field("搜索模型", p.WebSearchModel) + "\n")
 		right.WriteString(theme.Field("Explore", p.SubagentsModels.Explore) + "\n")
 		right.WriteString(theme.Field("Plan", p.SubagentsModels.Plan) + "\n")

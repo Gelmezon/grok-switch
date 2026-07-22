@@ -49,6 +49,7 @@ func TestApplyEmpty(t *testing.T) {
 	if got := asString(model["api_backend"]); got != "chat_completions" {
 		t.Fatalf("api_backend = %q, want chat_completions", got)
 	}
+	assertCodebaseUploadProtection(t, data, true)
 	if !strings.Contains(string(raw), "sk-xxx") {
 		t.Fatalf("missing key: %s", raw)
 	}
@@ -59,6 +60,92 @@ func TestApplyEmpty(t *testing.T) {
 	// Re-parse.
 	if _, err := Load(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestApplyCanAllowCodebaseUploadExplicitly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	p := sampleProfile()
+	if err := Apply(path, p); err != nil {
+		t.Fatal(err)
+	}
+	p.SetCodebaseUploadDisabled(false)
+	if err := Apply(path, p); err != nil {
+		t.Fatal(err)
+	}
+	data, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCodebaseUploadProtection(t, data, false)
+	ok, err := Match(path, p)
+	if err != nil || !ok {
+		t.Fatalf("explicit upload setting should match: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestApplyPreservesUnknownPrivacyFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	initial := `[features]
+future_feature = "keep"
+
+[telemetry]
+future_trace_setting = 42
+
+[harness]
+future_harness_setting = true
+`
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(path, sampleProfile()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCodebaseUploadProtection(t, data, true)
+	for _, test := range []struct {
+		path []string
+		want interface{}
+	}{
+		{[]string{"features", "future_feature"}, "keep"},
+		{[]string{"telemetry", "future_trace_setting"}, int64(42)},
+		{[]string{"harness", "future_harness_setting"}, true},
+	} {
+		if got := nestedValue(data, test.path...); got != test.want {
+			t.Fatalf("unknown privacy setting %v = %#v, want %#v", test.path, got, test.want)
+		}
+	}
+}
+
+func assertCodebaseUploadProtection(t *testing.T, data map[string]interface{}, disabled bool) {
+	t.Helper()
+	if !disabled {
+		for _, path := range managedPrivacyPaths {
+			if nestedExists(data, path...) {
+				t.Fatalf("privacy setting %s should be removed when protection is off", strings.Join(path, "."))
+			}
+		}
+		return
+	}
+	want := map[string]bool{
+		"features.telemetry":              false,
+		"features.codebase_indexing":      false,
+		"telemetry.trace_upload":          false,
+		"harness.disable_codebase_upload": true,
+	}
+	for path, expected := range want {
+		parts := strings.Split(path, ".")
+		if !nestedExists(data, parts...) {
+			t.Fatalf("missing privacy setting %s", path)
+		}
+		if got := asBool(nestedValue(data, parts...)); got != expected {
+			t.Fatalf("privacy setting %s = %v, want %v", path, got, expected)
+		}
 	}
 }
 
@@ -269,6 +356,18 @@ func TestMatchChecksEveryManagedField(t *testing.T) {
 		{"plan model", func(d map[string]interface{}) {
 			d["subagents"].(map[string]interface{})["models"].(map[string]interface{})["plan"] = "wrong"
 		}},
+		{"telemetry", func(d map[string]interface{}) {
+			d["features"].(map[string]interface{})["telemetry"] = true
+		}},
+		{"codebase indexing", func(d map[string]interface{}) {
+			d["features"].(map[string]interface{})["codebase_indexing"] = true
+		}},
+		{"trace upload", func(d map[string]interface{}) {
+			d["telemetry"].(map[string]interface{})["trace_upload"] = true
+		}},
+		{"codebase upload", func(d map[string]interface{}) {
+			d["harness"].(map[string]interface{})["disable_codebase_upload"] = false
+		}},
 		{"reasoning effort", func(d map[string]interface{}) {
 			d["model"].(map[string]interface{})[p.DefaultModel].(map[string]interface{})["reasoning_effort"] = "low"
 		}},
@@ -391,6 +490,16 @@ func TestApplyOfficialPreservesUnknownManagedSectionFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	initial := `# keep comment
+[features]
+telemetry = false
+codebase_indexing = false
+
+[telemetry]
+trace_upload = false
+
+[harness]
+disable_codebase_upload = true
+
 [endpoints]
 api_url = "https://relay.example.com/v1"
 future_endpoint = "keep"
@@ -425,6 +534,11 @@ future_model_field = "keep"
 	if err != nil || !official {
 		t.Fatalf("want official config: %v %v", official, err)
 	}
+	data, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCodebaseUploadProtection(t, data, true)
 	raw, _ := os.ReadFile(path)
 	for _, want := range []string{"# keep comment", `future_endpoint = "keep"`, "future_models = 42", "future_subagent = true", `future_model_field = "keep"`} {
 		if !strings.Contains(string(raw), want) {
@@ -612,7 +726,17 @@ reasoning_efforts = ["low", "medium", "high"]
 func TestImportFromCurrentGrokConfigWithoutLegacyEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	content := `[models]
+	content := `[features]
+telemetry = true
+codebase_indexing = true
+
+[telemetry]
+trace_upload = true
+
+[harness]
+disable_codebase_upload = false
+
+[models]
 default = "grok-4.5-latest"
 web_search = "grok-4.5-latest"
 
@@ -635,6 +759,9 @@ plan = "grok-4.5-latest"
 	}
 	if imp.BaseURL != "https://relay.example.com/v1" || imp.UpstreamFormat != "openai_chat" || imp.APIKey != "sk-current" {
 		t.Fatalf("import mismatch: %+v", imp)
+	}
+	if imp.CodebaseUploadDisabled() {
+		t.Fatal("import should preserve explicit codebase upload choice")
 	}
 }
 

@@ -152,6 +152,14 @@ func TestOfficial(t *testing.T) {
 	if _, ok := data["endpoints"]; ok {
 		t.Fatal("endpoints should be gone")
 	}
+	features, ok := data["features"].(map[string]interface{})
+	if !ok || features["telemetry"] != false || features["codebase_indexing"] != false {
+		t.Fatalf("official mode should preserve privacy features: %#v", data["features"])
+	}
+	harness, ok := data["harness"].(map[string]interface{})
+	if !ok || harness["disable_codebase_upload"] != true {
+		t.Fatalf("official mode should preserve codebase upload protection: %#v", data["harness"])
+	}
 	got, _ := s.Get(a.ID)
 	if got.IsActive {
 		t.Fatal("should clear active")

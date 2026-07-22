@@ -55,7 +55,12 @@ func (m *StatusModel) View() string {
 		body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
 		body.WriteString(theme.Field("Base URL", p.BaseURL) + "\n")
 		body.WriteString(theme.Field("默认模型", p.DefaultModel) + "\n")
-		body.WriteString(theme.Field("推理等级", p.DefaultReasoningEffort) + "\n\n")
+		body.WriteString(theme.Field("推理等级", p.DefaultReasoningEffort) + "\n")
+		privacy := theme.Warning.Render(theme.SymWarn + " 已允许")
+		if p.CodebaseUploadDisabled() {
+			privacy = theme.Success.Render(theme.SymOK + " 已禁止")
+		}
+		body.WriteString(theme.Field("源码上传", privacy) + "\n\n")
 		body.WriteString(theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与供应商一致")) + "\n")
 		return theme.BoxSuccess.Width(m.width).Render(body.String() + "\n" + theme.Help.Render("Esc 返回"))
 	default:

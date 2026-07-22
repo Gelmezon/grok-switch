@@ -104,6 +104,7 @@ func RenderStatus(st switcher.Status, version string) string {
 			theme.Field("Base URL", p.BaseURL),
 			theme.Field("默认模型", p.DefaultModel),
 			theme.Field("推理等级", p.DefaultReasoningEffort),
+			theme.Field("源码上传", codebaseUploadLabel(*p)),
 			"",
 			theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与供应商一致")),
 		)
@@ -137,12 +138,13 @@ func RenderStatus(st switcher.Status, version string) string {
 }
 
 // RenderSwitchSuccess formats a successful use result.
-func RenderSwitchSuccess(name, baseURL, model, backup string) string {
+func RenderSwitchSuccess(p profiles.Profile, backup string) string {
 	body := joinFields(
-		theme.Success.Render(theme.SymOK)+"  已切换到 "+theme.Bold.Render(name),
+		theme.Success.Render(theme.SymOK)+"  已切换到 "+theme.Bold.Render(p.Name),
 		"",
-		theme.Field("Base URL", baseURL),
-		theme.Field("模型", model),
+		theme.Field("Base URL", p.BaseURL),
+		theme.Field("模型", p.DefaultModel),
+		theme.Field("源码上传", codebaseUploadLabel(p)),
 		theme.Field("备份", backup),
 		"",
 		theme.Warning.Render(theme.SymWarn)+"  已运行的 Grok 会话不会自动重载，请新开会话",
@@ -179,10 +181,18 @@ func RenderShow(p profiles.Profile, showKey bool) string {
 		theme.Field("Explore", p.SubagentsModels.Explore),
 		theme.Field("Plan", p.SubagentsModels.Plan),
 		theme.Field("推理等级", p.DefaultReasoningEffort),
+		theme.Field("源码上传", codebaseUploadLabel(p)),
 		theme.Field("API Key", key),
 		theme.Field("状态", active),
 	)
 	return box(body, "normal") + "\n"
+}
+
+func codebaseUploadLabel(p profiles.Profile) string {
+	if p.CodebaseUploadDisabled() {
+		return theme.Success.Render(theme.SymOK + " 已禁止")
+	}
+	return theme.Warning.Render(theme.SymWarn + " 已允许")
 }
 
 // RenderTestResult formats a probe result.

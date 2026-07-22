@@ -37,6 +37,7 @@ So I automated it. `grok-switch` stores each relay as a profile, fetches the liv
 | Official Grok authentication is needed again | `official` removes fields managed by grok-switch while preserving unrelated Grok settings. |
 | The server has no desktop environment | It ships as one Linux binary with a full-screen TUI, regular CLI output, pipe support, and CI-friendly operation. |
 | API keys can leak into shell history or `ps` | There is no `--api-key` argument. Hidden prompts, standard input, environment variables, and restrictive file permissions are supported. |
+| Telemetry, indexing, or the harness should not upload a codebase | “Disable codebase upload” is enabled by default and writes Grok's privacy settings with the active profile; users can explicitly opt out. |
 
 ## What happens during a switch
 
@@ -224,6 +225,36 @@ grok-switch update rollback
 - Atomic writes + automatic backups + rollback.
 - `status` shows `official` / `managed-relay` / `unmanaged-or-unknown`.
 - `test` validates auth + Models + Chat Completions separately.
+
+## Disable codebase upload
+
+Every profile has a **Disable codebase upload** toggle that is enabled by default. In the TUI add/edit screen, press `Tab` to focus the privacy setting and `Space` to toggle it. The next `use` operation writes the following fields to `~/.grok/config.toml` while protection is enabled:
+
+```toml
+[features]
+telemetry = false
+codebase_indexing = false
+
+[telemetry]
+trace_upload = false
+
+[harness]
+disable_codebase_upload = true
+```
+
+For non-interactive CLI use:
+
+```bash
+# Default: deny uploads
+grok-switch add relay-a --base-url https://relay.example.com/v1 \
+  --codebase-upload deny
+
+# Change an existing profile, then select it again to apply the config
+grok-switch edit relay-a --codebase-upload allow
+grok-switch use relay-a
+```
+
+`deny` writes the four fields above. `allow` removes only those four grok-switch-managed fields and restores Grok's own default behavior; it does not actively set telemetry or uploads to `true`. The privacy fields remain when switching to `official` because they are not part of relay routing.
 
 ## Self-updates
 

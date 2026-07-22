@@ -162,6 +162,9 @@ func printHelp(w io.Writer) {
 全局标志:
   --no-interactive        强制纯 CLI 模式（禁用 TUI/向导）
 
+Profile 隐私标志（add/edit）:
+  --codebase-upload deny|allow   禁止上传源码（默认 deny）或恢复 Grok 默认行为
+
 环境变量:
   GROK_HOME / GROK_CONFIG / GROK_SWITCH_HOME
   GROK_SWITCH_API_KEY     非交互 API Key

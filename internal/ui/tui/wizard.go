@@ -14,22 +14,25 @@ import (
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
 )
 
-// WizardModel is now a single-step create/edit wizard (Name + Base URL + API Key).
+// WizardModel is a single-step create/edit wizard with a privacy toggle.
 type WizardModel struct {
-	mode     string // "add" or "edit"
-	existing profiles.Profile
-	inputs   []textinput.Model
-	errMsg   string
-	width    int
-	onDone   func(profiles.Profile) tea.Cmd
+	mode                  string // "add" or "edit"
+	existing              profiles.Profile
+	inputs                []textinput.Model
+	disableCodebaseUpload bool
+	privacyFocused        bool
+	errMsg                string
+	width                 int
+	onDone                func(profiles.Profile) tea.Cmd
 }
 
 func NewWizard(mode string, prefill profiles.Profile, onDone func(profiles.Profile) tea.Cmd) *WizardModel {
 	m := &WizardModel{
-		mode:     mode,
-		width:    60,
-		existing: prefill,
-		onDone:   onDone,
+		mode:                  mode,
+		width:                 60,
+		existing:              prefill,
+		onDone:                onDone,
+		disableCodebaseUpload: prefill.CodebaseUploadDisabled(),
 	}
 	m.inputs = makeInputsSingle()
 	m.inputs[0].SetValue(prefill.Name)
@@ -67,14 +70,26 @@ func (m *WizardModel) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		case "esc":
 			return m, func() tea.Msg { return DoneMsg{} }
 		case "tab":
-			// simple tab between inputs
+			if m.privacyFocused {
+				m.privacyFocused = false
+				m.inputs[0].Focus()
+				return m, textinput.Blink
+			}
 			for i := range m.inputs {
 				if m.inputs[i].Focused() {
-					next := (i + 1) % len(m.inputs)
 					m.inputs[i].Blur()
-					m.inputs[next].Focus()
+					if i == len(m.inputs)-1 {
+						m.privacyFocused = true
+						return m, nil
+					}
+					m.inputs[i+1].Focus()
 					return m, textinput.Blink
 				}
+			}
+		case " ", "left", "right":
+			if m.privacyFocused {
+				m.disableCodebaseUpload = !m.disableCodebaseUpload
+				return m, nil
 			}
 		case "enter":
 			if err := m.validate(); err != nil {
@@ -150,6 +165,7 @@ func (m *WizardModel) build() profiles.Profile {
 	p.Name = strings.TrimSpace(m.inputs[0].Value())
 	p.BaseURL = strings.TrimSpace(m.inputs[1].Value())
 	p.APIKey = strings.TrimSpace(m.inputs[2].Value())
+	p.SetCodebaseUploadDisabled(m.disableCodebaseUpload)
 	// The single-step form intentionally hides model settings. New profiles
 	// still need a model to pass store validation and produce a usable config.
 	if strings.TrimSpace(p.DefaultModel) == "" {
@@ -164,7 +180,7 @@ func (m *WizardModel) View() string {
 	if m.mode == "edit" {
 		title = "编辑供应商"
 	}
-	header := fmt.Sprintf("%s  (一步完成：名称 + Base URL + API Key)", title)
+	header := fmt.Sprintf("%s  (一步完成：连接信息 + 隐私设置)", title)
 
 	var body strings.Builder
 	body.WriteString(theme.Muted.Render("供应商名称\n"))
@@ -179,13 +195,27 @@ func (m *WizardModel) View() string {
 	body.WriteString(theme.Muted.Render("API Key（输入时不显示）\n"))
 	body.WriteString(theme.Muted.Render("─────────────────────") + "\n")
 	body.WriteString(m.inputs[2].View() + "\n")
-	body.WriteString(theme.Muted.Render("也可通过环境变量 GROK_SWITCH_API_KEY 传入") + "\n")
+	body.WriteString(theme.Muted.Render("也可通过环境变量 GROK_SWITCH_API_KEY 传入") + "\n\n")
+
+	privacy := "[ ] 禁止上传源代码"
+	privacyHint := "已关闭：允许 Grok 使用默认遥测与代码索引行为"
+	if m.disableCodebaseUpload {
+		privacy = "[✓] 禁止上传源代码"
+		privacyHint = "已开启（默认）：关闭遥测、Trace 上传和代码库索引"
+	}
+	if m.privacyFocused {
+		privacy = theme.Selected.Render(privacy + "  ← Space 切换")
+	}
+	body.WriteString(theme.Muted.Render("隐私保护\n"))
+	body.WriteString(theme.Muted.Render("────────") + "\n")
+	body.WriteString(privacy + "\n")
+	body.WriteString(theme.Muted.Render(privacyHint) + "\n")
 
 	if m.errMsg != "" {
 		body.WriteString("\n" + theme.Error.Render(theme.SymFail+"  "+m.errMsg) + "\n")
 	}
 
-	footer := theme.Help.Render("Enter 保存  Esc 返回  Ctrl+C 退出")
+	footer := theme.Help.Render("Tab 切换字段  Space 开关隐私  Enter 保存  Esc 返回")
 	content := theme.Title.Render(header) + "\n\n" + body.String() + "\n" + footer
 	return theme.BoxActive.Width(m.width).Render(content)
 }

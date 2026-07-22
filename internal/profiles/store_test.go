@@ -47,6 +47,20 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
+func TestCodebaseUploadProtectionDefaultsOnAndCanBeDisabled(t *testing.T) {
+	p := sample("relay")
+	if !p.CodebaseUploadDisabled() {
+		t.Fatal("legacy/new profile should disable codebase upload by default")
+	}
+	p.SetCodebaseUploadDisabled(false)
+	if p.CodebaseUploadDisabled() {
+		t.Fatal("explicit opt-out should allow codebase upload")
+	}
+	if p.DisableCodebaseUpload == nil || *p.DisableCodebaseUpload {
+		t.Fatal("explicit false choice was not persisted")
+	}
+}
+
 func TestApplyDiscoveredModels(t *testing.T) {
 	p := sample("relay")
 	p.DefaultModel = "missing"

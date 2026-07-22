@@ -23,9 +23,23 @@ type Profile struct {
 	WebSearchModel         string          `json:"web_search_model"`
 	SubagentsModels        SubagentsModels `json:"subagents_models"`
 	Models                 []ModelDef      `json:"models"`
+	DisableCodebaseUpload  *bool           `json:"disable_codebase_upload,omitempty"`
 	CreatedAt              time.Time       `json:"created_at"`
 	UpdatedAt              time.Time       `json:"updated_at"`
 	IsActive               bool            `json:"is_active"`
+}
+
+// CodebaseUploadDisabled reports the effective privacy setting. A missing
+// value represents the secure default so profiles created by older releases
+// are protected automatically after upgrading.
+func (p Profile) CodebaseUploadDisabled() bool {
+	return p.DisableCodebaseUpload == nil || *p.DisableCodebaseUpload
+}
+
+// SetCodebaseUploadDisabled records an explicit privacy choice.
+func (p *Profile) SetCodebaseUploadDisabled(disabled bool) {
+	p.DisableCodebaseUpload = new(bool)
+	*p.DisableCodebaseUpload = disabled
 }
 
 // SubagentsModels holds model IDs for subagent roles.
@@ -189,6 +203,7 @@ func (p Profile) Public() map[string]interface{} {
 		"default_reasoning_effort": p.DefaultReasoningEffort,
 		"web_search_model":         p.WebSearchModel,
 		"subagents_models":         p.SubagentsModels,
+		"disable_codebase_upload":  p.CodebaseUploadDisabled(),
 		"created_at":               p.CreatedAt,
 		"updated_at":               p.UpdatedAt,
 		"is_active":                p.IsActive,
