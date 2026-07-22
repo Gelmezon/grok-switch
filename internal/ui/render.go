@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Gelmezon/grok-switch/internal/models"
 	"github.com/Gelmezon/grok-switch/internal/probe"
 	"github.com/Gelmezon/grok-switch/internal/profiles"
 	"github.com/Gelmezon/grok-switch/internal/secret"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // RenderProfileList formats providers for `list` command.
@@ -86,8 +86,8 @@ func RenderStatus(st switcher.Status, version string) string {
 	b.WriteString(HeaderLine("当前状态", version) + "\n\n")
 
 	var body string
-	switch {
-	case !st.HasActive:
+	switch st.Mode {
+	case switcher.StatusOfficial:
 		body = joinFields(
 			theme.Success.Render(theme.SymActive)+" 当前配置: "+theme.Bold.Render(models.OfficialName+"（默认）"),
 			"",
@@ -95,7 +95,7 @@ func RenderStatus(st switcher.Status, version string) string {
 			theme.Field("说明", "使用 Grok 官方认证，无活动中间站供应商"),
 		)
 		body = box(body, "success")
-	case st.DiskMatches:
+	case switcher.StatusManagedRelay:
 		p := st.Profile
 		body = joinFields(
 			theme.Success.Render(theme.SymActive)+" 活动供应商: "+theme.Bold.Render(p.Name),
@@ -109,17 +109,27 @@ func RenderStatus(st switcher.Status, version string) string {
 		)
 		body = box(body, "success")
 	default:
-		p := st.Profile
-		body = joinFields(
-			theme.Warning.Render(theme.SymWarn)+" 活动供应商: "+p.Name+"（配置不一致）",
-			"",
-			theme.Field("配置文件", st.ConfigPath),
-			theme.Field("供应商期望", p.BaseURL),
-			theme.Field("默认模型", p.DefaultModel),
-			"",
-			theme.Field("磁盘配置", theme.Error.Render(theme.SymFail+" 与供应商不一致")),
-			theme.Field("建议运行", "grok-switch use "+p.Name+"  重新同步"),
-		)
+		if st.Profile != nil {
+			p := st.Profile
+			body = joinFields(
+				theme.Warning.Render(theme.SymWarn)+" 活动供应商: "+p.Name+"（配置不一致）",
+				"",
+				theme.Field("配置文件", st.ConfigPath),
+				theme.Field("供应商期望", p.BaseURL),
+				theme.Field("默认模型", p.DefaultModel),
+				"",
+				theme.Field("磁盘配置", theme.Error.Render(theme.SymFail+" 与供应商不一致")),
+				theme.Field("建议运行", "grok-switch use "+p.Name+"  重新同步"),
+			)
+		} else {
+			body = joinFields(
+				theme.Warning.Render(theme.SymWarn)+" 当前配置: 未托管或未知",
+				"",
+				theme.Field("配置文件", st.ConfigPath),
+				theme.Field("说明", "检测到中间站相关字段，但 profiles.json 中没有对应活动供应商"),
+				theme.Field("建议运行", "grok-switch use <name> 或 grok-switch official"),
+			)
+		}
 		body = box(body, "warning")
 	}
 	b.WriteString("  " + indent(body, "  ") + "\n")
@@ -177,27 +187,36 @@ func RenderShow(p profiles.Profile, showKey bool) string {
 
 // RenderTestResult formats a probe result.
 func RenderTestResult(name string, r probe.Result) string {
+	checkLabel := func(ok bool) string {
+		if ok {
+			return theme.Success.Render(theme.SymOK + " 通过")
+		}
+		return theme.Error.Render(theme.SymFail + " 失败")
+	}
+	fields := []string{
+		theme.Field("供应商", name),
+		theme.Field("协议", r.Protocol),
+		theme.Field("认证", checkLabel(r.AuthenticationOK)),
+		theme.Field("Models 端点", checkLabel(r.ModelsEndpointOK)),
+		theme.Field("Chat Completions", checkLabel(r.ChatCompletionOK)),
+	}
+	if r.Models.Endpoint != "" {
+		fields = append(fields, theme.Field("Models URL", r.Models.Endpoint))
+	}
+	if r.Chat.Endpoint != "" {
+		fields = append(fields, theme.Field("Chat URL", r.Chat.Endpoint))
+	}
+	fields = append(fields,
+		theme.Field("结果", r.Message),
+		theme.Field("总耗时", fmt.Sprintf("%d ms", r.Latency.Milliseconds())),
+	)
+
 	var body string
 	if r.OK {
-		body = joinFields(
-			theme.Success.Render(theme.SymOK)+"  连通性测试通过",
-			"",
-			theme.Field("供应商", name),
-			theme.Field("端点", r.Endpoint),
-			theme.Field("结果", r.Message),
-			theme.Field("耗时", fmt.Sprintf("%d ms", r.Latency.Milliseconds())),
-		)
+		body = joinFields(append([]string{theme.Success.Render(theme.SymOK) + "  连通性测试通过", ""}, fields...)...)
 		return box(body, "success") + "\n"
 	}
-	body = joinFields(
-		theme.Error.Render(theme.SymFail)+"  连通性测试失败",
-		"",
-		theme.Field("供应商", name),
-		theme.Field("端点", r.Endpoint),
-		theme.Field("HTTP", fmt.Sprintf("%d", r.StatusCode)),
-		theme.Field("原因", r.Message),
-		theme.Field("耗时", fmt.Sprintf("%d ms", r.Latency.Milliseconds())),
-	)
+	body = joinFields(append([]string{theme.Error.Render(theme.SymFail) + "  连通性测试失败", ""}, fields...)...)
 	return box(body, "error") + "\n"
 }
 

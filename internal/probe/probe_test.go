@@ -4,28 +4,34 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/Gelmezon/grok-switch/internal/profiles"
 )
 
 func TestTestModelSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
 		if r.Header.Get("Authorization") != "Bearer sk-test" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"choices": []map[string]interface{}{{"message": map[string]string{"content": "ok"}}},
-		})
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{{"message": map[string]string{"content": "ok"}}},
+			})
+		case "/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": []map[string]string{{"id": "grok-4"}}})
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer srv.Close()
 
 	r := TestModel(srv.URL+"/v1", "sk-test", "grok-4", 5*time.Second)
-	if !r.OK {
+	if !r.OK || !r.AuthenticationOK || !r.ModelsEndpointOK || !r.ChatCompletionOK {
 		t.Fatalf("expected OK: %+v", r)
 	}
 }
@@ -40,5 +46,57 @@ func TestTestModelAuthFail(t *testing.T) {
 	r := TestModel(srv.URL+"/v1", "bad", "grok-4", 5*time.Second)
 	if r.OK {
 		t.Fatal("expected failure")
+	}
+	if r.AuthenticationOK || r.ModelsEndpointOK || r.ChatCompletionOK {
+		t.Fatalf("all checks should fail: %+v", r)
+	}
+}
+
+func TestModelsSuccessDoesNotHideMissingChatCompletions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			http.NotFound(w, r)
+		case "/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": []map[string]string{{"id": "grok-4"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	r := TestModel(srv.URL+"/v1", "sk-test", "grok-4", 5*time.Second)
+	if r.OK || r.ChatCompletionOK {
+		t.Fatalf("chat failure must fail the overall result: %+v", r)
+	}
+	if !r.AuthenticationOK || !r.ModelsEndpointOK {
+		t.Fatalf("models reachability should be reported separately: %+v", r)
+	}
+}
+
+func TestChatTwoHundredWithoutCompletionPayloadFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok"})
+	}))
+	defer srv.Close()
+
+	r := TestModel(srv.URL+"/v1", "sk-test", "grok-4", 5*time.Second)
+	if r.OK || r.ChatCompletionOK {
+		t.Fatalf("invalid chat payload must not pass: %+v", r)
+	}
+	if !r.AuthenticationOK || !r.ModelsEndpointOK {
+		t.Fatalf("successful HTTP endpoints should still report reachability: %+v", r)
+	}
+}
+
+func TestUnsupportedProtocolFailsExplicitly(t *testing.T) {
+	r := TestProfile(profiles.Profile{
+		UpstreamFormat: "anthropic_messages",
+		BaseURL:        "https://example.com",
+		APIKey:         "sk-test",
+		DefaultModel:   "grok-4",
+	}, time.Second)
+	if r.OK || !strings.Contains(r.Message, "当前仅支持 OpenAI Chat Completions") {
+		t.Fatalf("unexpected result: %+v", r)
 	}
 }

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Gelmezon/grok-switch/internal/models"
 	"github.com/Gelmezon/grok-switch/internal/switcher"
 	"github.com/Gelmezon/grok-switch/internal/ui/theme"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // StatusModel is a full-screen status card (TUI overlay).
@@ -43,13 +43,13 @@ func (m *StatusModel) View() string {
 	var body strings.Builder
 	body.WriteString(theme.Title.Render("grok-switch  当前状态") + "\n\n")
 
-	switch {
-	case !st.HasActive:
+	switch st.Mode {
+	case switcher.StatusOfficial:
 		body.WriteString(theme.Success.Render(theme.SymActive+" 当前: "+models.OfficialName+"（默认官方配置）") + "\n\n")
 		body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
 		body.WriteString(theme.Field("说明", "使用 Grok 官方认证") + "\n")
 		return theme.BoxSuccess.Width(m.width).Render(body.String() + "\n" + theme.Help.Render("Esc 返回"))
-	case st.DiskMatches:
+	case switcher.StatusManagedRelay:
 		p := st.Profile
 		body.WriteString(theme.Success.Render(theme.SymActive+" 活动供应商: "+p.Name) + "\n\n")
 		body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
@@ -59,13 +59,20 @@ func (m *StatusModel) View() string {
 		body.WriteString(theme.Field("磁盘配置", theme.Success.Render(theme.SymOK+" 与供应商一致")) + "\n")
 		return theme.BoxSuccess.Width(m.width).Render(body.String() + "\n" + theme.Help.Render("Esc 返回"))
 	default:
-		p := st.Profile
-		body.WriteString(theme.Warning.Render(theme.SymWarn+" 活动供应商: "+p.Name+"（配置不一致）") + "\n\n")
-		body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
-		body.WriteString(theme.Field("供应商期望", p.BaseURL) + "\n")
-		body.WriteString(theme.Field("默认模型", p.DefaultModel) + "\n\n")
-		body.WriteString(theme.Field("磁盘配置", theme.Error.Render(theme.SymFail+" 与供应商不一致")) + "\n")
-		body.WriteString(theme.Field("建议运行", fmt.Sprintf("grok-switch use %s", p.Name)) + "\n")
+		if st.Profile != nil {
+			p := st.Profile
+			body.WriteString(theme.Warning.Render(theme.SymWarn+" 活动供应商: "+p.Name+"（配置不一致）") + "\n\n")
+			body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
+			body.WriteString(theme.Field("供应商期望", p.BaseURL) + "\n")
+			body.WriteString(theme.Field("默认模型", p.DefaultModel) + "\n\n")
+			body.WriteString(theme.Field("磁盘配置", theme.Error.Render(theme.SymFail+" 与供应商不一致")) + "\n")
+			body.WriteString(theme.Field("建议运行", fmt.Sprintf("grok-switch use %s", p.Name)) + "\n")
+		} else {
+			body.WriteString(theme.Warning.Render(theme.SymWarn+" 当前: 未托管或未知配置") + "\n\n")
+			body.WriteString(theme.Field("配置文件", st.ConfigPath) + "\n")
+			body.WriteString(theme.Field("说明", "检测到中间站字段，但没有活动供应商记录") + "\n")
+			body.WriteString(theme.Field("建议运行", "grok-switch use <name> 或 grok-switch official") + "\n")
+		}
 		return theme.BoxWarning.Width(m.width).Render(body.String() + "\n" + theme.Help.Render("Esc 返回"))
 	}
 }

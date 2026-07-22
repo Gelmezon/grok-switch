@@ -211,10 +211,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.push(NewStatusScreen(st))
 
 	case requestAddMsg:
-		return a, a.push(NewAddWizard("", a.doCreate))
+		return a, a.push(NewWizard("add", profiles.Profile{}, a.doCreate))
 
 	case requestEditMsg:
-		return a, a.push(NewEditWizard(msg.Profile, a.doUpdate(msg.Profile.ID)))
+		return a, a.push(NewWizard("edit", msg.Profile, a.doUpdate(msg.Profile.ID)))
 
 	case requestDeleteMsg:
 		p := msg.Profile
@@ -239,8 +239,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cur := theme.SymActive + " 官方"
 		st, _ := switcher.ActiveStatus(a.store, a.paths.GrokConfig)
-		if st.HasActive && st.Profile != nil {
+		if st.Profile != nil {
 			cur = theme.SymActive + " " + st.Profile.Name + "  " + st.Profile.DefaultModel
+		} else if st.Mode == switcher.StatusUnmanagedOrUnknown {
+			cur = theme.SymWarn + " 未托管或未知配置"
 		}
 		body := fmt.Sprintf("从  %s\n到  %s %s  %s\n\n备份将自动保存到 %s",
 			cur, theme.SymInactive, p.Name, p.DefaultModel, a.paths.BackupsDir)
@@ -270,7 +272,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p := msg.Profile
 		a.setToast("正在测试 " + p.Name + " …")
 		return a, func() tea.Msg {
-			r := probe.TestModel(p.BaseURL, p.APIKey, p.DefaultModel, 20*time.Second)
+			r := probe.TestProfile(p, 20*time.Second)
 			if r.OK {
 				return InfoMsg{Text: fmt.Sprintf("测试通过 %s · %s · %dms", p.Name, r.Message, r.Latency.Milliseconds())}
 			}
@@ -385,7 +387,7 @@ func (a *App) doCreate(p profiles.Profile) tea.Cmd {
 		if err != nil {
 			return ErrMsg{Err: err}
 		}
-		return DoneMsg{Payload: InfoMsg{Text: "已添加供应商 " + created.Name + "（高级模型可稍后编辑）"}}
+		return DoneMsg{Payload: InfoMsg{Text: "已添加供应商 " + created.Name}}
 	}
 }
 

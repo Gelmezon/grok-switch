@@ -115,6 +115,8 @@ grok-switch tui
 | `?` | 帮助 |
 | `q` | 退出 |
 
+**注意**：添加/编辑供应商现在使用**单步界面**（供应商名称 + Base URL + API Key）。**模型配置已移除** TUI 中，请在官方 Grok 界面自行配置模型。
+
 ### CLI 常用命令
 
 ```bash
@@ -153,6 +155,7 @@ grok-switch update rollback
 | `grok-switch` / `tui` | 全屏 TUI |
 | `add` / `edit` / `delete` / `show` / `list` | Profile 管理 |
 | `use` / `status` / `official` | 切换与状态 |
+| `test <name-or-id>` | 分别测试认证、Models 端点和 Chat Completions |
 | `import-current <name>` | 从当前 config.toml 导入 |
 | `backup list\|restore\|prune` | 备份 |
 | `update check` / `update` / `update rollback` | 检查、安装和回退程序版本 |
@@ -179,28 +182,23 @@ grok-switch update rollback
 
 ## 安全要点
 
-- API Key 不入参数、日志、history
-- 数据目录 `0700`，敏感文件 `0600`，入口 `umask(0077)`
-- 原子写入 + 切换前备份 + `flock` 并发保护
+- API Key **绝不**入参数/日志/history（推荐用 `GROK_SWITCH_API_KEY` 或交互提示）。
+- 目录 `0700` / 文件 `0600` / 入口 `umask(0077)`。
+- 原子写入 + 自动备份 + 回滚。
+- `status` 显示 `official` / `managed-relay` / `unmanaged`。
+- `test` 分别验证认证、Models、Chat Completions。
 
 ## 自动更新
 
-TUI 启动后会异步检查 GitHub 最新稳定版，检查结果缓存 24 小时，不会阻塞主界面。按 `U` 可随时强制检查；发现新版本后会直接在 TUI 内弹出确认框并完成安装。
+TUI 启动异步检查最新 Release（缓存 24h）。按 `U` 强制检查 → 直接弹出确认更新。
 
 ```bash
-grok-switch update check          # 强制联网检查
-grok-switch update                # 交互确认后更新
-grok-switch update --yes          # 非交互更新
-grok-switch update rollback       # 回退到保留的上一版本
+grok-switch update          # 检查 + 更新（交互）
+grok-switch update --yes   # 非交互更新
+grok-switch update rollback # 回退上一版本
 ```
 
-更新器会按当前架构选择 Release 二进制，验证 SHA-256 和二进制内版本号，再通过同目录原子替换完成安装。当前版本会保留为 `grok-switch.previous`。
-
-`GROK_SWITCH_UPDATE_MODE=auto` 可启用自动安装，但目标程序必须对当前用户可写。默认安装到 `/usr/local/bin` 时通常需要：
-
-```bash
-sudo grok-switch update
-```
+`grok-switch.previous` 保留。自动模式：`GROK_SWITCH_UPDATE_MODE=auto`。
 
 ## 退出码
 
@@ -209,7 +207,7 @@ sudo grok-switch update
 | 0 | 成功 |
 | 1 | 运行错误 |
 | 2 | 用法错误 |
-| 3 | status：磁盘与 Profile 不一致 |
+| 3 | `status`：未托管/未知或 Profile 不匹配 |
 | 4 | Profile 不存在 |
 | 5 | 锁超时 |
 | 6 | 配置解析失败 |
